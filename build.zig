@@ -30,6 +30,10 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    switch (optimize) {
+        .Debug, .ReleaseSafe => lib.bundle_compiler_rt = true,
+        else => lib.strip = true,
+    }
     lib.addIncludePath("wolfssl");
     lib.addIncludePath(sdkPath("/"));
     lib.addCSourceFiles(&wolfssl_sources, &cflags);
@@ -82,15 +86,25 @@ const cflags = [_][]const u8{
 
 const wolfssl_sources = [_][]const u8{
     sdkPath("/src/bio.c"),
+    sdkPath("/src/conf.c"),
     sdkPath("/src/crl.c"),
+    sdkPath("/src/dtls.c"),
+    sdkPath("/src/dtls13.c"),
     sdkPath("/src/internal.c"),
     sdkPath("/src/keys.c"),
     sdkPath("/src/ocsp.c"),
+    sdkPath("/src/pk.c"),
+    sdkPath("/src/quic.c"),
     sdkPath("/src/sniffer.c"),
     sdkPath("/src/ssl.c"),
+    sdkPath("/src/ssl_asn1.c"),
+    sdkPath("/src/ssl_bn.c"),
+    sdkPath("/src/ssl_misc.c"),
     sdkPath("/src/tls.c"),
     sdkPath("/src/tls13.c"),
     sdkPath("/src/wolfio.c"),
+    sdkPath("/src/x509.c"),
+    sdkPath("/src/x509_str.c"),
 };
 
 const wolfcrypt_sources = [_][]const u8{
@@ -108,18 +122,20 @@ const wolfcrypt_sources = [_][]const u8{
     sdkPath("/wolfcrypt/src/compress.c"),
     sdkPath("/wolfcrypt/src/cpuid.c"),
     sdkPath("/wolfcrypt/src/cryptocb.c"),
-    sdkPath("/wolfcrypt/src/curve448.c"),
     sdkPath("/wolfcrypt/src/curve25519.c"),
+    sdkPath("/wolfcrypt/src/curve448.c"),
     sdkPath("/wolfcrypt/src/des3.c"),
     sdkPath("/wolfcrypt/src/dh.c"),
+    sdkPath("/wolfcrypt/src/dilithium.c"),
     sdkPath("/wolfcrypt/src/dsa.c"),
     sdkPath("/wolfcrypt/src/ecc.c"),
-    sdkPath("/wolfcrypt/src/eccsi.c"),
     sdkPath("/wolfcrypt/src/ecc_fp.c"),
-    sdkPath("/wolfcrypt/src/ed448.c"),
+    sdkPath("/wolfcrypt/src/eccsi.c"),
     sdkPath("/wolfcrypt/src/ed25519.c"),
+    sdkPath("/wolfcrypt/src/ed448.c"),
     sdkPath("/wolfcrypt/src/error.c"),
     sdkPath("/wolfcrypt/src/evp.c"),
+    sdkPath("/wolfcrypt/src/ext_kyber.c"),
     sdkPath("/wolfcrypt/src/falcon.c"),
     sdkPath("/wolfcrypt/src/fe_448.c"),
     sdkPath("/wolfcrypt/src/fe_low_mem.c"),
@@ -128,9 +144,8 @@ const wolfcrypt_sources = [_][]const u8{
     sdkPath("/wolfcrypt/src/ge_low_mem.c"),
     sdkPath("/wolfcrypt/src/ge_operations.c"),
     sdkPath("/wolfcrypt/src/hash.c"),
-    // sdkPath("/wolfcrypt/src/hc128.c"),
     sdkPath("/wolfcrypt/src/hmac.c"),
-    // sdkPath("/wolfcrypt/src/idea.c"),
+    sdkPath("/wolfcrypt/src/hpke.c"),
     sdkPath("/wolfcrypt/src/integer.c"),
     sdkPath("/wolfcrypt/src/kdf.c"),
     sdkPath("/wolfcrypt/src/logging.c"),
@@ -139,21 +154,21 @@ const wolfcrypt_sources = [_][]const u8{
     sdkPath("/wolfcrypt/src/md5.c"),
     sdkPath("/wolfcrypt/src/memory.c"),
     sdkPath("/wolfcrypt/src/misc.c"),
-    sdkPath("/wolfcrypt/src/pkcs7.c"),
     sdkPath("/wolfcrypt/src/pkcs12.c"),
+    sdkPath("/wolfcrypt/src/pkcs7.c"),
     sdkPath("/wolfcrypt/src/poly1305.c"),
     sdkPath("/wolfcrypt/src/pwdbased.c"),
-    // sdkPath("/wolfcrypt/src/rabbit.c"),
     sdkPath("/wolfcrypt/src/random.c"),
     sdkPath("/wolfcrypt/src/rc2.c"),
     sdkPath("/wolfcrypt/src/ripemd.c"),
     sdkPath("/wolfcrypt/src/rsa.c"),
     sdkPath("/wolfcrypt/src/sakke.c"),
     sdkPath("/wolfcrypt/src/sha.c"),
-    sdkPath("/wolfcrypt/src/sha3.c"),
     sdkPath("/wolfcrypt/src/sha256.c"),
+    sdkPath("/wolfcrypt/src/sha3.c"),
     sdkPath("/wolfcrypt/src/sha512.c"),
     sdkPath("/wolfcrypt/src/signature.c"),
+    sdkPath("/wolfcrypt/src/siphash.c"),
     sdkPath("/wolfcrypt/src/sp_arm32.c"),
     sdkPath("/wolfcrypt/src/sp_arm64.c"),
     sdkPath("/wolfcrypt/src/sp_armthumb.c"),
@@ -163,10 +178,13 @@ const wolfcrypt_sources = [_][]const u8{
     sdkPath("/wolfcrypt/src/sp_dsp32.c"),
     sdkPath("/wolfcrypt/src/sp_int.c"),
     sdkPath("/wolfcrypt/src/sp_x86_64.c"),
+    sdkPath("/wolfcrypt/src/sphincs.c"),
     sdkPath("/wolfcrypt/src/srp.c"),
     sdkPath("/wolfcrypt/src/tfm.c"),
     sdkPath("/wolfcrypt/src/wc_dsp.c"),
     sdkPath("/wolfcrypt/src/wc_encrypt.c"),
+    sdkPath("/wolfcrypt/src/wc_kyber.c"),
+    sdkPath("/wolfcrypt/src/wc_kyber_poly.c"),
     sdkPath("/wolfcrypt/src/wc_pkcs11.c"),
     sdkPath("/wolfcrypt/src/wc_port.c"),
     sdkPath("/wolfcrypt/src/wolfevent.c"),
@@ -176,6 +194,7 @@ const wolfcrypt_sources = [_][]const u8{
 fn sdkPath(comptime suffix: []const u8) []const u8 {
     if (suffix[0] != '/') @compileError("relToPath requires an absolute path!");
     return comptime blk: {
+        @setEvalBranchQuota(2000);
         const root_dir = std.fs.path.dirname(@src().file) orelse ".";
         break :blk root_dir ++ suffix;
     };
