@@ -1,0 +1,12 @@
+.{
+    .name = "wolfssl",
+    .version = "5.8.0",
+    .dependencies = .{},
+    .license = "GPLv2",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "wrapper",
+        "doc",
+    },
+}
