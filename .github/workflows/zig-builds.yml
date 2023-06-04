@@ -1,0 +1,54 @@
+name: Zig Build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        targets:
+          - x86_64-linux-gnu
+          - x86-linux-gnu
+          - aarch64-linux-gnu
+          - aarch64-linux-musl
+          - riscv64-linux-musl
+          # - mipsel-linux-musl
+          # - mips-linux-musl
+          - powerpc64-linux-musl
+          - x86_64-macos
+          - aarch64-macos
+          - x86_64-windows-gnu
+          - x86-windows-gnu
+          - aarch64-windows-gnu
+
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          fetch-depth: 0
+      - uses: mlugg/setup-zig@v2
+      - name: Install QEMU
+        run: |
+              sudo apt update && sudo apt install -y \
+              qemu-user-binfmt
+      - name: Build Summary ${{ matrix.targets }}
+        run: zig build -DTests --summary all -freference-trace -Dtarget=${{ matrix.targets }}
+      - name: Zig Wrapper tests ${{ matrix.targets }}
+        if: ${{ contains(matrix.targets, 'linux') && !contains(matrix.targets, 'aarch64-linux-gnu') }}
+        run: zig build test --summary all -freference-trace -Dtarget=${{ matrix.targets }}
+
+  zig-msvc:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v5
+      - uses: mlugg/setup-zig@v2
+      - name: Build Summary native-windows-msvc
+        run: zig build -DTests --summary all -freference-trace -Dtarget=native-windows-msvc
+      - name: Zig Wrapper tests native-windows-msvc
+        run: zig build test --summary all -freference-trace -Dtarget=native-windows-msvc

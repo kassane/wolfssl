@@ -1,0 +1,22 @@
+.{
+    .name = .wolfssl,
+    .license = "GPLv2",
+    .version = "5.8.2",
+    .fingerprint = 0x192f6f88d6775285,
+    .minimum_zig_version = "0.15.1",
+    .dependencies = .{
+        .test_runner = .{
+            .url = "git+https://gist.github.com/karlseguin/c6bea5b35e4e8d26af6f81c22cb5d76b#eb15512d6ae49663fa9df6c7a9725b20dab43edd",
+            .hash = "N-V-__8AAHMkAAC4CUVVTX0UMBJXtfOubskbF9EJ7X6qAGYR",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "wrapper",
+        "doc",
+        "src",
+        "wolfcrypt",
+        "wolfssl",
+    },
+}
