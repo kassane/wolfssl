@@ -417,3 +417,7 @@ user_settings_asm.h
 
 # auto-created CMake backups
 **/CMakeLists.txt.old
+
+# Zig build
+/zig-out/
+/zig-cache/
