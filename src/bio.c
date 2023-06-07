@@ -1790,9 +1790,7 @@ WOLFSSL_BIO_METHOD *wolfSSL_BIO_meth_new(int type, const char *name)
 void wolfSSL_BIO_meth_free(WOLFSSL_BIO_METHOD *biom)
 {
     WOLFSSL_ENTER("wolfSSL_BIO_meth_free");
-    if (biom) {
-        XFREE(biom, NULL, DYNAMIC_TYPE_OPENSSL);
-    }
+    XFREE(biom, NULL, DYNAMIC_TYPE_OPENSSL);
 }
 
 
@@ -2695,8 +2693,13 @@ int wolfSSL_BIO_flush(WOLFSSL_BIO* bio)
     WOLFSSL_BIO* wolfSSL_BIO_push(WOLFSSL_BIO* top, WOLFSSL_BIO* append)
     {
         WOLFSSL_ENTER("wolfSSL_BIO_push");
-        top->next    = append;
-        append->prev = top;
+        if (top == NULL) {
+            return append;
+        }
+        top->next = append;
+        if (append != NULL) {
+            append->prev = top;
+        }
 
         /* SSL BIO's should use the next object in the chain for IO */
         if (top->type == WOLFSSL_BIO_SSL && top->ptr)

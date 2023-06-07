@@ -181,12 +181,12 @@ static int wolfSSL_i2d_X509_ALGOR(const WOLFSSL_X509_ALGOR* algor, byte* buf)
         ret = 0;
     }
     else if (GetObjectId(algor->algorithm->obj, &idx, &oid,
-            algor->algorithm->grp, algor->algorithm->objSz) < 0) {
+            (word32)algor->algorithm->grp, algor->algorithm->objSz) < 0) {
         WOLFSSL_MSG("Issue getting OID of object");
         ret = 0;
     }
     else {
-        ret = SetAlgoID(oid, buf, algor->algorithm->grp, 0);
+        ret = (int)SetAlgoID((int)oid, buf, algor->algorithm->grp, 0);
     }
 
     return ret;
@@ -203,9 +203,9 @@ static int wolfSSL_i2d_ASN1_BIT_STRING(const WOLFSSL_ASN1_BIT_STRING* bit_str,
 {
     int len;
 
-    len = SetBitString(bit_str->length, 0, buf);
+    len = (int)SetBitString((word32)bit_str->length, 0, buf);
     if ((buf != NULL) && (bit_str->data != NULL)) {
-        XMEMCPY(buf + len, bit_str->data, bit_str->length);
+        XMEMCPY(buf + len, bit_str->data, (size_t)bit_str->length);
     }
 
     return len + bit_str->length;
@@ -295,10 +295,11 @@ static int wolfssl_i2d_asn1_items(const void* src, byte*buf,
 static int i2d_ASN_SEQUENCE(const void* src, byte* buf,
     const WOLFSSL_ASN1_ITEM* tpl)
 {
-    int seq_len;
-    int len = 0;
+    word32 seq_len;
+    word32 len = 0;
 
-    seq_len = wolfssl_i2d_asn1_items(src, NULL, tpl->members, tpl->mcount);
+    seq_len = (word32)wolfssl_i2d_asn1_items(src, NULL, tpl->members,
+        tpl->mcount);
     if (seq_len != 0) {
         len = SetSequence(seq_len, buf);
         if (buf != NULL) {
@@ -307,7 +308,7 @@ static int i2d_ASN_SEQUENCE(const void* src, byte* buf,
         len += seq_len;
     }
 
-    return len;
+    return (int)len;
 }
 
 /* Encode ASN1 template item.
@@ -363,7 +364,7 @@ int wolfSSL_ASN1_item_i2d(const void* src, byte** dest,
 
     if ((ret == 1) && (dest != NULL)) {
         if (*dest == NULL) {
-            buf = (byte*)XMALLOC(len, NULL, DYNAMIC_TYPE_ASN1);
+            buf = (byte*)XMALLOC((size_t)len, NULL, DYNAMIC_TYPE_ASN1);
             if (buf == NULL)
                 ret = 0;
             *dest = buf;
@@ -465,13 +466,14 @@ static int wolfssl_asn1_bit_string_grow(WOLFSSL_ASN1_BIT_STRING* bitStr,
     byte* tmp;
 
     /* Realloc to length required. */
-    tmp = (byte*)XREALLOC(bitStr->data, len, NULL, DYNAMIC_TYPE_OPENSSL);
+    tmp = (byte*)XREALLOC(bitStr->data, (size_t)len, NULL,
+        DYNAMIC_TYPE_OPENSSL);
     if (tmp == NULL) {
         ret = 0;
     }
     else {
         /* Clear out new, top bytes. */
-        XMEMSET(tmp + bitStr->length, 0, len - bitStr->length);
+        XMEMSET(tmp + bitStr->length, 0, (size_t)(len - bitStr->length));
         bitStr->data = tmp;
         bitStr->length = len;
     }
@@ -622,7 +624,7 @@ static int wolfssl_asn1_integer_require_len(WOLFSSL_ASN1_INTEGER* a, int len,
     a->length = 0;
     if ((!a->isDynamic) && (len > (int)a->dataMax)) {
         /* Create a new buffer to hold large integer value. */
-        data = (byte*)XMALLOC(len, NULL, DYNAMIC_TYPE_OPENSSL);
+        data = (byte*)XMALLOC((size_t)len, NULL, DYNAMIC_TYPE_OPENSSL);
         if (data == NULL) {
             ret = 0;
         }
@@ -630,13 +632,13 @@ static int wolfssl_asn1_integer_require_len(WOLFSSL_ASN1_INTEGER* a, int len,
             /* Indicate data is dynamic and copy data over. */
             a->isDynamic = 1;
             a->data = data;
-            a->dataMax = len;
+            a->dataMax = (word32)len;
         }
     }
     if (keepOldData) {
          if (oldData != a->data) {
              /* Copy old data into new buffer. */
-             XMEMCPY(a->data, oldData, oldLen);
+             XMEMCPY(a->data, oldData, (size_t)oldLen);
          }
          /* Restore old length. */
          a->length = oldLen;
@@ -682,7 +684,7 @@ WOLFSSL_ASN1_INTEGER* wolfSSL_ASN1_INTEGER_dup(const WOLFSSL_ASN1_INTEGER* src)
             dup = NULL;
         }
         else {
-            XMEMCPY(dup->data, src->data, src->length);
+            XMEMCPY(dup->data, src->data, (size_t)src->length);
         }
     }
 
@@ -728,7 +730,7 @@ int wolfSSL_ASN1_INTEGER_cmp(const WOLFSSL_ASN1_INTEGER* a,
         }
         else {
             /* Compare data given they are the same length. */
-            ret = XMEMCMP(a->data, b->data, a->length);
+            ret = XMEMCMP(a->data, b->data, (size_t)a->length);
         }
         /* Reverse comparison result when both negative. */
         if (a->negative) {
@@ -779,7 +781,7 @@ static int wolfssl_asn1_int_twos_compl(byte* data, int length, byte* neg)
     int len;
 
     /* Get length from DER header. */
-    if (GetLength(data, &idx, &len, length) < 0) {
+    if (GetLength(data, &idx, &len, (word32)length) < 0) {
         ret = -1;
     }
     else {
@@ -787,7 +789,7 @@ static int wolfssl_asn1_int_twos_compl(byte* data, int length, byte* neg)
             *neg = data[idx] & 0x80;
         }
         if ((neg == NULL) || (*neg != 0)) {
-            wolfssl_twos_compl(data + idx, length - idx);
+            wolfssl_twos_compl(data + idx, length - (int)idx);
         }
     }
 
@@ -819,7 +821,8 @@ int wolfSSL_i2d_ASN1_INTEGER(const WOLFSSL_ASN1_INTEGER* a, unsigned char** out)
 
     if ((ret == 0) && (*out == NULL)) {
         /* Allocate buffer to hold encoding. */
-        buf = (unsigned char*)XMALLOC(a->length, NULL, DYNAMIC_TYPE_ASN1);
+        buf = (unsigned char*)XMALLOC((size_t)a->length, NULL,
+            DYNAMIC_TYPE_ASN1);
         if (buf == NULL) {
             WOLFSSL_MSG("Failed to allocate output buffer.");
             ret = -1;
@@ -829,7 +832,7 @@ int wolfSSL_i2d_ASN1_INTEGER(const WOLFSSL_ASN1_INTEGER* a, unsigned char** out)
     }
     if (ret == 0) {
         /* Copy the data (including tag and length) into output buffer. */
-        XMEMCPY(*out, a->data, a->length);
+        XMEMCPY(*out, a->data, (size_t)a->length);
         /* Only magnitude of the number stored (i.e. the sign isn't encoded).
          * The "negative" field is 1 if the value must be interpreted as
          * negative and we need to output the 2's complement of the value in
@@ -898,7 +901,8 @@ WOLFSSL_ASN1_INTEGER* wolfSSL_d2i_ASN1_INTEGER(WOLFSSL_ASN1_INTEGER** a,
     if ((!err) && ((ret = wolfSSL_ASN1_INTEGER_new()) == NULL)) {
         err = 1;
     }
-    if ((!err) && (wolfssl_asn1_integer_require_len(ret, idx + len, 0) != 1)) {
+    if ((!err) && (wolfssl_asn1_integer_require_len(ret, (int)idx + len, 0) !=
+            1)) {
         err = 1;
     }
     if (!err) {
@@ -906,8 +910,8 @@ WOLFSSL_ASN1_INTEGER* wolfSSL_d2i_ASN1_INTEGER(WOLFSSL_ASN1_INTEGER** a,
         ret->type = V_ASN1_INTEGER;
 
         /* Copy DER encoding and length. */
-        XMEMCPY(ret->data, *in, idx + len);
-        ret->length = idx + len;
+        XMEMCPY(ret->data, *in, (size_t)(idx + (word32)len));
+        ret->length = (int)idx + len;
         /* Do 2's complement if number is negative. */
         if (wolfssl_asn1_int_twos_compl(ret->data, ret->length, &ret->negative)
                 != 0) {
@@ -997,7 +1001,6 @@ int wolfSSL_a2i_ASN1_INTEGER(WOLFSSL_BIO *bio, WOLFSSL_ASN1_INTEGER *asn1,
 {
     int ret = 1;
     int readNextLine = 1;
-    int lineLen;
     int len;
     word32 outLen = 0;
     const int hdrSz = 1 + MAX_LENGTH_SZ;
@@ -1010,6 +1013,8 @@ int wolfSSL_a2i_ASN1_INTEGER(WOLFSSL_BIO *bio, WOLFSSL_ASN1_INTEGER *asn1,
     }
 
     while ((ret == 1) && readNextLine) {
+        int lineLen;
+
         /* Assume we won't be reading any more. */
         readNextLine = 0;
 
@@ -1042,12 +1047,10 @@ int wolfSSL_a2i_ASN1_INTEGER(WOLFSSL_BIO *bio, WOLFSSL_ASN1_INTEGER *asn1,
         if (ret == 1) {
             /* Decode string and append to data. */
             outLen = (word32)(lineLen / 2);
-            (void)Base16_Decode((byte*)buf, lineLen, asn1->data + asn1->length,
-                &outLen);
-        }
-        if (ret == 1) {
+            (void)Base16_Decode((byte*)buf, (word32)lineLen,
+                asn1->data + asn1->length, &outLen);
             /* Update length of data. */
-            asn1->length += outLen;
+            asn1->length += (int)outLen;
         }
     }
 
@@ -1057,7 +1060,7 @@ int wolfSSL_a2i_ASN1_INTEGER(WOLFSSL_BIO *bio, WOLFSSL_ASN1_INTEGER *asn1,
         /* Get ASN.1 header length. */
         idx = SetASNInt(asn1->length, asn1->data[0], NULL);
         /* Move data to be after ASN.1 header. */
-        XMEMMOVE(asn1->data + idx, asn1->data, asn1->length);
+        XMEMMOVE(asn1->data + idx, asn1->data, (size_t)asn1->length);
         /* Encode ASN.1 header. */
         SetASNInt(asn1->length, asn1->data[idx], asn1->data);
         /* Update length of data. */
@@ -1092,7 +1095,7 @@ int wolfSSL_i2a_ASN1_INTEGER(BIO *bp, const WOLFSSL_ASN1_INTEGER *a)
 
     if (!err) {
         /* Read DER length - must be at least 1 byte. */
-        if (GetLength(a->data, &idx, &len, a->length) <= 0) {
+        if (GetLength(a->data, &idx, &len, (word32)a->length) <= 0) {
             err = 1;
         }
     }
@@ -1100,7 +1103,7 @@ int wolfSSL_i2a_ASN1_INTEGER(BIO *bp, const WOLFSSL_ASN1_INTEGER *a)
     /* Keep encoding and writing while no error and bytes in data. */
     while ((!err) && (idx < (word32)a->length)) {
         /* Number of bytes left to encode. */
-        int encLen = a->length - idx;
+        int encLen = a->length - (int)idx;
         /* Reduce to maximum buffer size if necessary. */
         if (encLen > (int)sizeof(buf) / 2) {
             encLen = (int)sizeof(buf) / 2;
@@ -1108,12 +1111,12 @@ int wolfSSL_i2a_ASN1_INTEGER(BIO *bp, const WOLFSSL_ASN1_INTEGER *a)
 
         /* Encode bytes from data into buffer. */
         bufLen = (int)sizeof(buf);
-        (void)Base16_Encode(a->data + idx, encLen, buf, &bufLen);
+        (void)Base16_Encode(a->data + idx, (word32)encLen, buf, &bufLen);
         /* Update index to next bytes to encoded. */
-        idx += encLen;
+        idx += (word32)encLen;
 
         /* Write out characters but not NUL char. */
-        if (wolfSSL_BIO_write(bp, buf, bufLen - 1) != (int)(bufLen - 1)) {
+        if (wolfSSL_BIO_write(bp, buf, (int)bufLen - 1) != (int)(bufLen - 1)) {
             err = 1;
         }
     }
@@ -1233,7 +1236,7 @@ int wolfSSL_i2c_ASN1_INTEGER(WOLFSSL_ASN1_INTEGER *a, unsigned char **pp)
             (*pp)[0] = padVal;
         }
         /* Copy remaining bytes into output buffer. */
-        XMEMCPY(*pp + pad, a->data + idx, len - pad);
+        XMEMCPY(*pp + pad, a->data + idx, (size_t)(len - pad));
         /* Two's complement copied bytes when negative. */
         if (a->negative) {
             wolfssl_twos_compl(*pp + pad, len - pad);
@@ -1272,7 +1275,7 @@ WOLFSSL_BIGNUM *wolfSSL_ASN1_INTEGER_to_BN(const WOLFSSL_ASN1_INTEGER *ai,
     if (!err) {
         /* Get the length of ASN.1 INTEGER number. */
         if ((ai->data[0] != ASN_INTEGER) || (GetLength(ai->data, &idx, &len,
-                ai->length) <= 0)) {
+                (word32)ai->length) <= 0)) {
         #if defined(WOLFSSL_QT) || defined(WOLFSSL_HAPROXY)
             idx = 0;
             len = ai->length;
@@ -1423,7 +1426,7 @@ long wolfSSL_ASN1_INTEGER_get(const WOLFSSL_ASN1_INTEGER* a)
     }
     if (ret > 0) {
         /* Get the big number as a word. */
-        ret = wolfSSL_BN_get_word(bn);
+        ret = (long)wolfSSL_BN_get_word(bn);
         /* Negate number of ASN.1 INTEGER was negative. */
         if (a->negative == 1) {
             ret = -ret;
@@ -1451,16 +1454,17 @@ long wolfSSL_ASN1_INTEGER_get(const WOLFSSL_ASN1_INTEGER* a)
 int wolfSSL_ASN1_INTEGER_set(WOLFSSL_ASN1_INTEGER *a, long v)
 {
     int ret = 1;
-    byte j;
-    unsigned int i = 0;
-    byte tmp[sizeof(long)];
-    byte pad = 0;
 
     /* Validate parameters. */
     if (a == NULL) {
         ret = 0;
     }
     if (ret == 1) {
+        byte j;
+        unsigned int i = 0;
+        byte tmp[sizeof(long)];
+        byte pad = 0;
+
         wolfssl_asn1_integer_reset_data(a);
 
         /* Check for negative. */
@@ -1789,7 +1793,7 @@ int wolfSSL_i2d_ASN1_OBJECT(WOLFSSL_ASN1_OBJECT *a, unsigned char **pp)
                 *pp += a->objSz;
             }
             /* Return length of DER encoding. */
-            len = a->objSz;
+            len = (int)a->objSz;
         }
     }
 
@@ -1827,7 +1831,8 @@ WOLFSSL_ASN1_OBJECT *wolfSSL_c2i_ASN1_OBJECT(WOLFSSL_ASN1_OBJECT **a,
 
     if (!err) {
         /* Allocate memory for content octets. */
-        ret->obj = (const unsigned char*)XMALLOC(len, NULL, DYNAMIC_TYPE_ASN1);
+        ret->obj = (const unsigned char*)XMALLOC((size_t)len, NULL,
+            DYNAMIC_TYPE_ASN1);
         if (ret->obj == NULL) {
             WOLFSSL_MSG("error allocating asn data memory");
             wolfSSL_ASN1_OBJECT_free(ret);
@@ -1840,7 +1845,7 @@ WOLFSSL_ASN1_OBJECT *wolfSSL_c2i_ASN1_OBJECT(WOLFSSL_ASN1_OBJECT **a,
         /* Content octets buffer was dynamically allocated. */
         ret->dynamic |= WOLFSSL_ASN1_DYNAMIC_DATA;
         /* Copy in content octets and set size. */
-        XMEMCPY((byte*)ret->obj, *pp, len);
+        XMEMCPY((byte*)ret->obj, *pp, (size_t)len);
         ret->objSz = (unsigned int)len;
 
         /* Move pointer to after data copied out. */
@@ -1879,7 +1884,6 @@ int wolfSSL_i2t_ASN1_OBJECT(char *buf, int buf_len, WOLFSSL_ASN1_OBJECT *a)
  */
 int wolfSSL_i2a_ASN1_OBJECT(WOLFSSL_BIO *bp, WOLFSSL_ASN1_OBJECT *a)
 {
-    int done = 0;
     int length = 0;
     int cLen = 0;
     word32 idx = 0;
@@ -1891,36 +1895,26 @@ int wolfSSL_i2a_ASN1_OBJECT(WOLFSSL_BIO *bp, WOLFSSL_ASN1_OBJECT *a)
 
     /* Validate parameters. */
     if (bp == NULL) {
-        done = 1;
+        /* Do nothing. */
     }
-
     /* NULL object is written as "NULL". */
-    if ((!done) && (a == NULL)) {
+    else if (a == NULL) {
         /* Write "NULL" - as done in OpenSSL. */
         length = wolfSSL_BIO_write(bp, null_str, (int)XSTRLEN(null_str));
-        done = 1;
     }
-
     /* Try getting text version and write it out. */
-    if ((!done) && ((length = i2t_ASN1_OBJECT(buf, sizeof(buf), a)) > 0)) {
+    else if ((length = i2t_ASN1_OBJECT(buf, sizeof(buf), a)) > 0) {
         length = wolfSSL_BIO_write(bp, buf, length);
-        done = 1;
     }
-
     /* Look for DER header. */
-    if ((!done) && ((a->obj == NULL) || (a->obj[idx++] != ASN_OBJECT_ID))) {
+    else if ((a->obj == NULL) || (a->obj[idx++] != ASN_OBJECT_ID)) {
         WOLFSSL_MSG("Bad ASN1 Object");
-        done = 1;
     }
-
     /* Get length from DER header. */
-    if ((!done) && (GetLength((const byte*)a->obj, &idx, &cLen, a->objSz) < 0))
-    {
+    else if (GetLength((const byte*)a->obj, &idx, &cLen, a->objSz) < 0) {
         length = 0;
-        done = 1;
     }
-
-    if (!done) {
+    else {
         /* Write out "<INVALID>" and dump content. */
         length = wolfSSL_BIO_write(bp, invalid_str, (int)XSTRLEN(invalid_str));
         length += wolfSSL_BIO_dump(bp, (const char*)(a->obj + idx), cLen);
@@ -2173,7 +2167,7 @@ int wolfSSL_ASN1_STRING_cmp(const WOLFSSL_ASN1_STRING *a,
         ret = a->length - b->length;
     }
     /* Compare data. */
-    else if ((ret = XMEMCMP(a->data, b->data, a->length)) == 0) {
+    else if ((ret = XMEMCMP(a->data, b->data, (size_t)a->length)) == 0) {
         /* Compare ASN.1 types - wolfSSL_ASN1_STRING_type_new(). */
         ret = a->type - b->type;
     }
@@ -2212,7 +2206,6 @@ int wolfSSL_ASN1_UNIVERSALSTRING_to_string(WOLFSSL_ASN1_STRING *s)
 {
     int ret = 1;
     char* p;
-    char* copy;
 
     WOLFSSL_ENTER("wolfSSL_ASN1_UNIVERSALSTRING_to_string");
 
@@ -2247,6 +2240,8 @@ int wolfSSL_ASN1_UNIVERSALSTRING_to_string(WOLFSSL_ASN1_STRING *s)
     }
 
     if (ret == 1) {
+        char* copy;
+
         /* Strip first three bytes of each four byte character. */
         for (copy = p = s->data; p < s->data + s->length; p += 4) {
             *copy++ = p[3];
@@ -2293,14 +2288,15 @@ int wolfSSL_ASN1_STRING_to_UTF8(unsigned char **out, WOLFSSL_ASN1_STRING *asn1)
     }
     if (len != -1) {
         /* Allocate buffer to hold string and NUL. */
-        buf = (unsigned char*)XMALLOC(len + 1, NULL, DYNAMIC_TYPE_OPENSSL);
+        buf = (unsigned char*)XMALLOC((size_t)(len + 1), NULL,
+            DYNAMIC_TYPE_OPENSSL);
         if (buf == NULL) {
             len = -1;
         }
     }
     if (len != -1) {
         /* Copy in string - NUL always put on end of stored string. */
-        XMEMCPY(buf, data, len + 1);
+        XMEMCPY(buf, data, (size_t)(len + 1));
         /* Return buffer. */
         *out = buf;
     }
@@ -2325,7 +2321,7 @@ static char* wolfssl_asn1_string_to_hex_chars(const WOLFSSL_ASN1_STRING *s)
     char* tmp;
     int tmpSz = s->length * 3;
 
-    tmp = (char*)XMALLOC(tmpSz, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+    tmp = (char*)XMALLOC((size_t)tmpSz, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     if (tmp == NULL) {
         WOLFSSL_MSG("Memory Error");
     }
@@ -2519,7 +2515,8 @@ int wolfSSL_ASN1_STRING_set(WOLFSSL_ASN1_STRING* asn1, const void* data, int sz)
         /* Check string will fit - including NUL. */
         if (sz + 1 > CTC_NAME_SIZE) {
             /* Allocate new buffer. */
-            asn1->data = (char*)XMALLOC(sz + 1, NULL, DYNAMIC_TYPE_OPENSSL);
+            asn1->data = (char*)XMALLOC((size_t)(sz + 1), NULL,
+                DYNAMIC_TYPE_OPENSSL);
             if (asn1->data == NULL) {
                 ret = 0;
             }
@@ -2539,7 +2536,7 @@ int wolfSSL_ASN1_STRING_set(WOLFSSL_ASN1_STRING* asn1, const void* data, int sz)
         /* Check if there is a string to copy. */
         if (data != NULL) {
             /* Copy string and append NUL. */
-            XMEMCPY(asn1->data, data, sz);
+            XMEMCPY(asn1->data, data, (size_t)sz);
             asn1->data[sz] = '\0';
         }
         /* Set size of string. */
@@ -2806,8 +2803,6 @@ static int wolfssl_asn1_string_dump_hex(WOLFSSL_BIO *bio,
 {
     const char* hash="#";
     char hex_tmp[4];
-    char* p;
-    char* end;
     int str_len = 1;
 
     /* Write out hash character to indicate hex string. */
@@ -2830,6 +2825,9 @@ static int wolfssl_asn1_string_dump_hex(WOLFSSL_BIO *bio,
     }
 
     if (str_len != -1) {
+        char* p;
+        char* end;
+
         /* Calculate end of string. */
         end = str->data + str->length - 1;
         for (p = str->data; p <= end; p++) {
@@ -3014,7 +3012,7 @@ static WC_INLINE const char* MonthStr(const char* n)
 
     i = (n[0] - '0') * 10 + (n[1] - '0') - 1;
     /* Convert string to number and index table. */
-    if ((i >= 0) && (i <= 12)) {
+    if ((i >= 0) && (i < 12)) {
         month = monthStr[i];
     }
 
@@ -3453,7 +3451,7 @@ int wolfSSL_ASN1_TIME_set_string(WOLFSSL_ASN1_TIME *t, const char *str)
     }
     if ((ret == 1) && (t != NULL)) {
         /* Copy in string including NUL terminator. */
-        XMEMCPY(t->data, str, slen);
+        XMEMCPY(t->data, str, (size_t)slen);
         /* Do not include NUL terminator in length. */
         t->length = slen - 1;
         /* Set ASN.1 type based on string length. */
@@ -3837,7 +3835,6 @@ int wolfSSL_ASN1_TIME_to_tm(const WOLFSSL_ASN1_TIME* asnTime, struct tm* tm)
  */
 int wolfSSL_ASN1_TIME_print(WOLFSSL_BIO* bio, const WOLFSSL_ASN1_TIME* asnTime)
 {
-    char buf[MAX_TIME_STRING_SZ];
     int  ret = 1;
 
     WOLFSSL_ENTER("wolfSSL_ASN1_TIME_print");
@@ -3849,6 +3846,7 @@ int wolfSSL_ASN1_TIME_print(WOLFSSL_BIO* bio, const WOLFSSL_ASN1_TIME* asnTime)
     }
 
     if (ret == 1) {
+        char buf[MAX_TIME_STRING_SZ];
         int len;
 
         /* Create human readable string. */
@@ -3995,7 +3993,7 @@ void wolfSSL_ASN1_TYPE_free(WOLFSSL_ASN1_TYPE* at)
 
 #endif /* OPENSSL_EXTRA */
 
-#if defined(OPENSSL_ALL) || defined(WOLFSSL_WPAS)
+#if defined(OPENSSL_ALL) || defined(OPENSSL_EXTRA) || defined(WOLFSSL_WPAS)
 /**
  * Set ASN.1 TYPE object with a type and value.
  *
@@ -4048,7 +4046,7 @@ void wolfSSL_ASN1_TYPE_set(WOLFSSL_ASN1_TYPE *a, int type, void *value)
     }
 }
 
-#endif /* OPENSSL_ALL || WOLFSSL_WPAS */
+#endif /* OPENSSL_ALL || OPENSSL_EXTRA || WOLFSSL_WPAS */
 
 #endif /* !NO_ASN */
 

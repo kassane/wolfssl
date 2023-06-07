@@ -358,14 +358,13 @@ int curve448(byte* r, const byte* n, const byte* a)
     word8 t1[56];
     int i;
     unsigned int swap;
-    unsigned int b;
 
     fe448_copy(x1, a);
     fe448_copy(x3, a);
 
     swap = 0;
     for (i = 447; i >= 0; --i) {
-        b = (n[i >> 3] >> (i & 7)) & 1;
+        unsigned int b = (n[i >> 3] >> (i & 7)) & 1;
         swap ^= b;
         fe448_cswap(x2, x3, swap);
         fe448_cswap(z2, z3, swap);
@@ -1077,7 +1076,6 @@ int curve448(byte* r, const byte* n, const byte* a)
     sword64 t1[8];
     int i;
     unsigned int swap;
-    unsigned int b;
 
     fe448_from_bytes(x1, a);
     fe448_1(x2);
@@ -1087,7 +1085,7 @@ int curve448(byte* r, const byte* n, const byte* a)
 
     swap = 0;
     for (i = 447; i >= 0; --i) {
-        b = (n[i >> 3] >> (i & 7)) & 1;
+        unsigned int b = (n[i >> 3] >> (i & 7)) & 1;
         swap ^= b;
         fe448_cswap(x2, x3, swap);
         fe448_cswap(z2, z3, swap);
@@ -1836,8 +1834,6 @@ static WC_INLINE void fe448_mul_8(sword32* r, const sword32* a, const sword32* b
     sword64 t13  = (sword64)a[ 6] * b[ 7];
     sword64 t113 = (sword64)a[ 7] * b[ 6];
     sword64 t14  = (sword64)a[ 7] * b[ 7];
-    sword64 o;
-    sword64 t15;
     t1  += t101;
     t2  += t102; t2  += t202;
     t3  += t103; t3  += t203; t3  += t303;
@@ -1854,8 +1850,8 @@ static WC_INLINE void fe448_mul_8(sword32* r, const sword32* a, const sword32* b
     t11 += t111; t11 += t211; t11 += t311;
     t12 += t112; t12 += t212;
     t13 += t113;
-    o = t14 >> 28;
-    t15 = o;
+    sword64 o = t14 >> 28;
+    sword64 t15 = o;
     t14 -= o << 28;
     o = (t0  >> 28); t1  += o; t = o << 28; t0  -= t;
     o = (t1  >> 28); t2  += o; t = o << 28; t1  -= t;
@@ -2171,7 +2167,6 @@ int curve448(byte* r, const byte* n, const byte* a)
     sword32 t1[16];
     int i;
     unsigned int swap;
-    unsigned int b;
 
     fe448_from_bytes(x1, a);
     fe448_1(x2);
@@ -2181,7 +2176,7 @@ int curve448(byte* r, const byte* n, const byte* a)
 
     swap = 0;
     for (i = 447; i >= 0; --i) {
-        b = (n[i >> 3] >> (i & 7)) & 1;
+        unsigned int b = (n[i >> 3] >> (i & 7)) & 1;
         swap ^= b;
         fe448_cswap(x2, x3, swap);
         fe448_cswap(z2, z3, swap);

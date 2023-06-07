@@ -18784,10 +18784,10 @@ static void LogAlert(int type)
 {
 #ifdef DEBUG_WOLFSSL
     const char* typeStr;
-    char buff[60];
 
     typeStr = AlertTypeToString(type);
     if (typeStr != NULL) {
+        char buff[60];
         XSNPRINTF(buff, sizeof(buff), "Alert type: %s", typeStr);
         WOLFSSL_MSG(buff);
     }
@@ -27394,7 +27394,7 @@ static int HashSkeData(WOLFSSL* ssl, enum wc_HashType hashType,
     #ifdef OPENSSL_EXTRA
         else
     #else
-        else if (IsTLS(ssl))
+        else if (IsTLS(ssl) || ssl->options.dtls)
     #endif
         {
             ssl->options.sendVerify = SEND_BLANK_CERT;

@@ -4097,7 +4097,7 @@ int wolfSSL_Rehandshake(WOLFSSL* ssl)
     else {
         /* Reset resuming flag to do full secure handshake. */
         ssl->options.resuming = 0;
-        #ifdef HAVE_SESSION_TICKET
+        #if defined(HAVE_SESSION_TICKET) && !defined(NO_WOLFSSL_CLIENT)
             /* Clearing the ticket. */
             ret = wolfSSL_UseSessionTicket(ssl);
         #endif
@@ -5245,8 +5245,10 @@ WOLFSSL_STACK* wolfSSL_CertManagerGetCerts(WOLFSSL_CERT_MANAGER* cm)
         if (x509 == NULL)
             goto error;
 
-        if (wolfSSL_sk_X509_push(sk, x509) != WOLFSSL_SUCCESS)
+        if (wolfSSL_sk_X509_push(sk, x509) != WOLFSSL_SUCCESS) {
+            wolfSSL_X509_free(x509);
             goto error;
+        }
     }
 
     for (i = 0; i < numCerts && certBuffers[i] != NULL; ++i) {
@@ -12637,17 +12639,19 @@ static int CheckcipherList(const char* list)
             /* list has mixed suites */
             return 0;
         }
-    }  while (next++); /* ++ needed to skip ':' */
+    }
+    while (next++); /* ++ needed to skip ':' */
 
     if (findTLSv13Suites == 0 && findbeforeSuites == 1) {
-        return 1;/* only before TLSv13 suites */
+        ret = 1;/* only before TLSv13 suites */
     }
     else if (findTLSv13Suites == 1 && findbeforeSuites == 0) {
-        return 2;/* only TLSv13 suties */
+        ret = 2;/* only TLSv13 suties */
     }
     else {
-        return 0;/* handle as mixed */
+        ret = 0;/* handle as mixed */
     }
+    return ret;
 }
 
 /* parse some bulk lists like !eNULL / !aNULL
@@ -35770,6 +35774,11 @@ int wolfSSL_RAND_Init(void)
                 ret = WOLFSSL_SUCCESS;
             }
         }
+        else {
+            /* GlobalRNG is already initialized */
+            ret = WOLFSSL_SUCCESS;
+        }
+
         wc_UnLockMutex(&globalRNGMutex);
     }
 #endif
@@ -35813,7 +35822,6 @@ const char* wolfSSL_RAND_file_name(char* fname, unsigned long len)
 {
 #ifndef NO_FILESYSTEM
     char* rt;
-    char ap[] = "/.rnd";
 
     WOLFSSL_ENTER("wolfSSL_RAND_file_name");
 
@@ -35835,6 +35843,8 @@ const char* wolfSSL_RAND_file_name(char* fname, unsigned long len)
 
     /* $RANDFILE was not set or is too large, check $HOME */
     if (rt == NULL) {
+        char ap[] = "/.rnd";
+
         WOLFSSL_MSG("Environment variable RANDFILE not set");
         if ((rt = XGETENV("HOME")) == NULL) {
             WOLFSSL_MSG("Environment variable HOME not set");
