@@ -19,32 +19,32 @@ jobs:
           version: master
       
       - name: Build Summary
-        run: zig build -fsummary -freference-trace
+        run: zig build -DTests -fsummary -freference-trace
       
       - name: Build Summary (x86-windows-gnu)
         if: startsWith(matrix.runs-on, 'windows')
-        run: zig build -fsummary -freference-trace -Dtarget=x86-windows
+        run: zig build -DTests -fsummary -freference-trace -Dtarget=x86-windows
 
       - name: Build Summary (arm64-windows-gnu)
         if: startsWith(matrix.runs-on, 'windows')
-        run: zig build -fsummary -freference-trace -Dtarget=aarch64-windows
+        run: zig build -DTests -fsummary -freference-trace -Dtarget=aarch64-windows
       
       - name: Build Summary (arm64-macos)
         if: startsWith(matrix.runs-on, 'macos')
-        run: zig build -fsummary -freference-trace -Dtarget=aarch64-macos
+        run: zig build -DTests -fsummary -freference-trace -Dtarget=aarch64-macos
       
       - name: Build Summary (arm64-linux-gnu)
         if: startsWith(matrix.runs-on, 'ubuntu')
-        run: zig build -fsummary -freference-trace -Dtarget=aarch64-linux-gnu
+        run: zig build -DTests -fsummary -freference-trace -Dtarget=aarch64-linux-gnu
 
       - name: Build Summary (arm64-linux-musl)
         if: startsWith(matrix.runs-on, 'ubuntu')
-        run: zig build -fsummary -freference-trace -Dtarget=aarch64-linux
+        run: zig build -DTests -fsummary -freference-trace -Dtarget=aarch64-linux
       
       - name: Build Summary (riscv64-linux-musl)
         if: startsWith(matrix.runs-on, 'ubuntu')
-        run: zig build -fsummary -freference-trace -Dtarget=riscv64-linux
+        run: zig build -DTests -fsummary -freference-trace -Dtarget=riscv64-linux
       
       - name: Build Summary (powerpc64-linux-musl)
         if: startsWith(matrix.runs-on, 'ubuntu')
-        run: zig build -fsummary -freference-trace -Dtarget=powerpc64-linux
+        run: zig build -DTests -fsummary -freference-trace -Dtarget=powerpc64-linux

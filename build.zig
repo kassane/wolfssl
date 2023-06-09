@@ -14,6 +14,51 @@ pub fn build(b: *std.Build) void {
 
     // Options
     const shared = b.option(bool, "Shared", "Build the Shared Library [default: false]") orelse false;
+    const tests = b.option(bool, "Tests", "Build all tests [default: true]") orelse false;
+
+    // {} void == define, null == undef
+    const config = b.addConfigHeader(.{
+        .style = .blank,
+        .include_path = "wolfssl/options.h",
+    }, .{
+        .ECC_SHAMIR = {},
+        .ECC_TIMING_RESISTANT = {},
+        .GCM_TABLE_4BIT = {},
+        .HAVE_AESGCM = {},
+        .HAVE_CHACHA = {},
+        .HAVE_DH_DEFAULT_PARAMS = {},
+        .HAVE_ECC = {},
+        .HAVE_ENCRYPT_THEN_MAC = {},
+        .HAVE_EXTENDED_MASTER = {},
+        .HAVE_FFDHE_2048 = {},
+        .HAVE_HASHDRBG = {},
+        .HAVE_HKDF = {},
+        .HAVE_POLY1305 = {},
+        .HAVE_PTHREAD = if (target.getAbi() != .msvc) {} else null,
+        .HAVE_SUPPORTED_CURVES = {},
+        .HAVE_THREAD_LS = {},
+        .HAVE_TLS_EXTENSIONS = {},
+        .HAVE_ONE_TIME_AUTH = {},
+        .NO_DES3 = {},
+        .NO_DSA = {},
+        .NO_MD4 = {},
+        .NO_PSK = {},
+        .WOLFSSL_BASE64_ENCODE = {},
+        .WOLFSSL_PSS_LONG_SALT = {},
+        .WOLFSSL_SHA224 = {},
+        .WOLFSSL_SHA384 = {},
+        .WOLFSSL_SHA3 = null,
+        .WOLFSSL_SHA512 = {},
+        .WOLFSSL_SYS_CA_CERTS = {},
+        .WOLFSSL_TLS13 = {},
+        .WOLFSSL_USE_ALIGN = {},
+        .WOLFSSL_X86_64_BUILD = if (isX86(target)) {} else null,
+        .WC_NO_ASYNC_THREADING = {},
+        .WC_RSA_BLINDING = {},
+        .WC_RSA_PSS = {},
+        .TFM_ECC256 = {},
+        .TFM_TIMING_RESISTANT = {},
+    });
 
     const lib = if (shared) b.addSharedLibrary(.{
         .name = "wolfssl",
@@ -22,7 +67,7 @@ pub fn build(b: *std.Build) void {
         .version = .{
             .major = 5,
             .minor = 6,
-            .patch = 0,
+            .patch = 2,
         },
     }) else b.addStaticLibrary(.{
         .name = "wolfssl",
@@ -34,6 +79,8 @@ pub fn build(b: *std.Build) void {
         .Debug, .ReleaseSafe => lib.bundle_compiler_rt = true,
         else => lib.strip = true,
     }
+    lib.addConfigHeader(config);
+    lib.addIncludePath(config.include_path);
     lib.addIncludePath("wolfssl");
     lib.addIncludePath(sdkPath("/"));
     lib.addCSourceFiles(&wolfssl_sources, &cflags);
@@ -77,6 +124,96 @@ pub fn build(b: *std.Build) void {
     // location when the user invokes the "install" step (the default step when
     // running `zig build`).
     b.installArtifact(lib);
+
+    if (tests) {
+        buildExe(b, .{
+            .target = target,
+            .optimize = optimize,
+            .lib = lib,
+            .path = "examples/asn1/asn1.c",
+        });
+        buildExe(b, .{
+            .target = target,
+            .optimize = optimize,
+            .lib = lib,
+            .path = "examples/echoclient/echoclient.c",
+        });
+        buildExe(b, .{
+            .target = target,
+            .optimize = optimize,
+            .lib = lib,
+            .path = "examples/echoserver/echoserver.c",
+        });
+        // Errors
+        // buildExe(b, .{
+        //     .target = target,
+        //     .optimize = optimize,
+        //     .lib = lib,
+        //     .path = "examples/client/client.c",
+        // });
+        // buildExe(b, .{
+        //     .target = target,
+        //     .optimize = optimize,
+        //     .lib = lib,
+        //     .path = "examples/server/server.c",
+        // });
+        buildExe(b, .{
+            .target = target,
+            .optimize = optimize,
+            .lib = lib,
+            .path = "examples/sctp/sctp-client.c",
+        });
+        buildExe(b, .{
+            .target = target,
+            .optimize = optimize,
+            .lib = lib,
+            .path = "examples/sctp/sctp-server.c",
+        });
+        buildExe(b, .{
+            .target = target,
+            .optimize = optimize,
+            .lib = lib,
+            .path = "examples/sctp/sctp-client-dtls.c",
+        });
+        buildExe(b, .{
+            .target = target,
+            .optimize = optimize,
+            .lib = lib,
+            .path = "examples/sctp/sctp-server-dtls.c",
+        });
+    }
+}
+
+fn buildExe(b: *std.Build, info: BuildInfo) void {
+    const exe = b.addExecutable(.{
+        .name = info.filename(),
+        .target = info.target,
+        .optimize = info.optimize,
+    });
+    exe.addCSourceFile(info.path, &cflags);
+    // get library include headers
+    for (info.lib.include_dirs.items) |include| {
+        exe.include_dirs.append(include) catch {};
+    }
+    if (info.target.isWindows()) {
+        exe.want_lto = false;
+        exe.linkSystemLibrary("ws2_32");
+        exe.linkSystemLibrary("crypt32");
+    }
+    exe.linkLibrary(info.lib);
+    exe.linkLibC();
+
+    b.installArtifact(exe);
+
+    const run_cmd = b.addRunArtifact(exe);
+    run_cmd.step.dependOn(b.getInstallStep());
+
+    if (b.args) |args| {
+        run_cmd.addArgs(args);
+    }
+
+    const run_step = b.step(info.filename(), b.fmt("Run the {s} sample", .{info.filename()}));
+    run_step.dependOn(&run_cmd.step);
 }
 
 const cflags = [_][]const u8{
@@ -199,3 +336,22 @@ fn sdkPath(comptime suffix: []const u8) []const u8 {
         break :blk root_dir ++ suffix;
     };
 }
+
+fn isX86(target: std.zig.CrossTarget) bool {
+    return switch (target.getCpuArch()) {
+        .x86, .x86_64 => true,
+        else => false,
+    };
+}
+
+const BuildInfo = struct {
+    target: std.zig.CrossTarget,
+    optimize: std.builtin.OptimizeMode,
+    path: []const u8,
+    lib: *std.Build.Step.Compile,
+
+    fn filename(self: BuildInfo) []const u8 {
+        var split = std.mem.split(u8, std.fs.path.basename(self.path), ".");
+        return split.first();
+    }
+};
