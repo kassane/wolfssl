@@ -67,7 +67,7 @@ pub fn build(b: *std.Build) void {
         .version = .{
             .major = 5,
             .minor = 6,
-            .patch = 2,
+            .patch = 3,
         },
     }) else b.addStaticLibrary(.{
         .name = "wolfssl",
