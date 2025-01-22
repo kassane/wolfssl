@@ -1,6 +1,6 @@
 /* pk.c
  *
- * Copyright (C) 2006-2024 wolfSSL Inc.
+ * Copyright (C) 2006-2025 wolfSSL Inc.
  *
  * This file is part of wolfSSL.
  *
@@ -12361,7 +12361,7 @@ WOLFSSL_EC_KEY* wolfSSL_d2i_ECPrivateKey(WOLFSSL_EC_KEY** key,
  *
  * @param [in]      key  EC key to encode.
  * @param [in, out] out  On in, reference to buffer to place DER encoding into.
- *                       On out, reference to buffer adter the encoding.
+ *                       On out, reference to buffer after the encoding.
  *                       May be NULL.
  * @return  Length of DER encoding on success.
  * @return  0 on error.

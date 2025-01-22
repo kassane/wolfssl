@@ -1,6 +1,6 @@
 /* settings.h
  *
- * Copyright (C) 2006-2024 wolfSSL Inc.
+ * Copyright (C) 2006-2025 wolfSSL Inc.
  *
  * This file is part of wolfSSL.
  *
@@ -438,9 +438,9 @@
 
 /* old FIPS has only AES_BLOCK_SIZE. */
 #if !defined(NO_AES) && (defined(HAVE_SELFTEST) || \
-     (defined(HAVE_FIPS) && FIPS_VERSION3_LT(7,0,0)))
+     (defined(HAVE_FIPS) && FIPS_VERSION3_LT(6,0,0)))
     #define WC_AES_BLOCK_SIZE AES_BLOCK_SIZE
-#endif /* !NO_AES && (HAVE_SELFTEST || FIPS_VERSION3_LT(7,0,0)) */
+#endif /* !NO_AES && (HAVE_SELFTEST || FIPS_VERSION3_LT(6,0,0)) */
 
 #ifdef WOLFSSL_HARDEN_TLS
     #if WOLFSSL_HARDEN_TLS != 112 && WOLFSSL_HARDEN_TLS != 128

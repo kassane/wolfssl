@@ -1,6 +1,6 @@
 /* pwdbased.c
  *
- * Copyright (C) 2006-2024 wolfSSL Inc.
+ * Copyright (C) 2006-2025 wolfSSL Inc.
  *
  * This file is part of wolfSSL.
  *
@@ -839,6 +839,8 @@ int wc_scrypt(byte* output, const byte* passwd, int passLen,
         ret = MEMORY_E;
         goto end;
     }
+
+    XMEMSET(y, 0, (size_t)(blockSize * 128));
 
     /* Step 1. */
     ret = wc_PBKDF2(blocks, passwd, passLen, salt, saltLen, 1, (int)blocksSz,

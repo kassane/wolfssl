@@ -1,6 +1,6 @@
 /* asn.h
  *
- * Copyright (C) 2006-2024 wolfSSL Inc.
+ * Copyright (C) 2006-2025 wolfSSL Inc.
  *
  * This file is part of wolfSSL.
  *
@@ -1249,6 +1249,7 @@ enum Oid_Types {
 
 enum Hash_Sum  {
     MD2h      = 646,
+    MD4h      = 648,
     MD5h      = 649,
     SHAh      =  88,
     SHA224h   = 417,

@@ -1,6 +1,6 @@
 /* ssl_certman.c
  *
- * Copyright (C) 2006-2024 wolfSSL Inc.
+ * Copyright (C) 2006-2025 wolfSSL Inc.
  *
  * This file is part of wolfSSL.
  *
@@ -44,6 +44,7 @@
  */
 static WC_INLINE WOLFSSL_METHOD* cm_pick_method(void* heap)
 {
+    (void)heap;
     #ifndef NO_WOLFSSL_CLIENT
         #if !defined(NO_OLD_TLS) && defined(WOLFSSL_ALLOW_SSLV3)
             return wolfSSLv3_client_method_ex(heap);
@@ -75,7 +76,6 @@ static WC_INLINE WOLFSSL_METHOD* cm_pick_method(void* heap)
     #else
         return NULL;
     #endif
-    (void)heap;
 }
 
 /* Create a new certificate manager with a heap hint.

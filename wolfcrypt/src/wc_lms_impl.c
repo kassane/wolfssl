@@ -1,6 +1,6 @@
 /* wc_lms_impl.c
  *
- * Copyright (C) 2006-2024 wolfSSL Inc.
+ * Copyright (C) 2006-2025 wolfSSL Inc.
  *
  * This file is part of wolfSSL.
  *
@@ -2097,8 +2097,10 @@ static int wc_lms_treehash_update(LmsState* state, LmsPrivState* privState,
 #endif /* WOLFSSL_SMALL_STACK */
 
     /* Public key, root node, is top of data stack. */
-    XMEMCPY(stack, stackCache->stack, params->height * params->hash_len);
-    sp = stack + stackCache->offset;
+    if (ret == 0) {
+        XMEMCPY(stack, stackCache->stack, params->height * params->hash_len);
+        sp = stack + stackCache->offset;
+    }
 
     /* Compute all nodes requested. */
     for (i = min_idx; (ret == 0) && (i <= max_idx); i++) {
@@ -2193,7 +2195,7 @@ static int wc_lms_treehash_update(LmsState* state, LmsPrivState* privState,
         }
     }
 
-    if (!useRoot) {
+    if (!useRoot && (ret == 0)) {
         /* Copy stack back. */
         XMEMCPY(stackCache->stack, stack, params->height * params->hash_len);
         stackCache->offset = (word32)((size_t)sp - (size_t)stack);

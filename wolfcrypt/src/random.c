@@ -1,6 +1,6 @@
 /* random.c
  *
- * Copyright (C) 2006-2024 wolfSSL Inc.
+ * Copyright (C) 2006-2025 wolfSSL Inc.
  *
  * This file is part of wolfSSL.
  *
@@ -818,7 +818,7 @@ static WC_INLINE word64 Entropy_TimeHiRes(void)
  */
 static WC_INLINE word64 Entropy_TimeHiRes(void)
 {
-    return mach_absolute_time();
+    return clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW);
 }
 #elif !defined(ENTROPY_MEMUSE_THREAD) && defined(__aarch64__)
 /* Get the high resolution time counter.

@@ -1,6 +1,6 @@
 /* ssl.h
  *
- * Copyright (C) 2006-2024 wolfSSL Inc.
+ * Copyright (C) 2006-2025 wolfSSL Inc.
  *
  * This file is part of wolfSSL.
  *
@@ -166,7 +166,7 @@
         #include <openssl/rc5.h>
         #include <openssl/ripemd.h>
         #include <openssl/rsa.h>
-        #if defined(HAVE_FIPS_VERSION) && FIPS_VERSION3_LT(7,0,0)
+        #if defined(HAVE_FIPS_VERSION) && FIPS_VERSION3_LT(6,0,0)
             /* clear conflicting name */
             #undef RSA_PKCS1_PADDING_SIZE
         #endif
@@ -2968,23 +2968,49 @@ enum { /* ssl Constants */
             (WOLFSSL_SESS_CACHE_NO_INTERNAL_STORE |
                     WOLFSSL_SESS_CACHE_NO_INTERNAL_LOOKUP),
 
-    /* These values match OpenSSL values for corresponding names. */
+    /* These values match OpenSSL values for corresponding names.*/
     WOLFSSL_ERROR_SSL              =  1,
+
+    /* Operation did not complete; call this API again.*/
     WOLFSSL_ERROR_WANT_READ        =  2,
+
+    /* Operation did not complete; call this API again.*/
     WOLFSSL_ERROR_WANT_WRITE       =  3,
+
+    /* Operation did not complete; callback needs this API to be called again.*/
     WOLFSSL_ERROR_WANT_X509_LOOKUP =  4,
+
+    /* Some sort of system I/O error happened.*/
     WOLFSSL_ERROR_SYSCALL          =  5,
+
+    /* The connection has been closed with a closure alert.*/
     WOLFSSL_ERROR_ZERO_RETURN      =  6,
+
+    /* Underlying protocol connection not started yet, call this API again.*/
     WOLFSSL_ERROR_WANT_CONNECT     =  7,
+
+    /* Underlying protocol connection not started yet, call this API again.*/
     WOLFSSL_ERROR_WANT_ACCEPT      =  8,
 
+    /* Close notify alert was sent to the peer.*/
     WOLFSSL_SENT_SHUTDOWN     = 1,
+
+    /* Close notify or fatal error was received from the peer.*/
     WOLFSSL_RECEIVED_SHUTDOWN = 2,
+
+    /* Let library know that write buffer might move to different addresses.*/
     WOLFSSL_MODE_ACCEPT_MOVING_WRITE_BUFFER = 4,
 
+    /* The handshake failed. */
     WOLFSSL_R_SSL_HANDSHAKE_FAILURE           = 101,
+
+    /* The issuer CA certificate is unknown. */
     WOLFSSL_R_TLSV1_ALERT_UNKNOWN_CA          = 102,
+
+    /* Unable to validate the certificate. */
     WOLFSSL_R_SSLV3_ALERT_CERTIFICATE_UNKNOWN = 103,
+
+    /* There was a problem parsing the certificate. */
     WOLFSSL_R_SSLV3_ALERT_BAD_CERTIFICATE     = 104,
 
     WOLF_PEM_BUFSIZE = 1024
@@ -4058,6 +4084,13 @@ WOLFSSL_API void  wolfSSL_CTX_SetGenMasterSecretCb(WOLFSSL_CTX* ctx,
                                                     CallbackGenMasterSecret cb);
 WOLFSSL_API void  wolfSSL_SetGenMasterSecretCtx(WOLFSSL* ssl, void *ctx);
 WOLFSSL_API void* wolfSSL_GetGenMasterSecretCtx(WOLFSSL* ssl);
+
+typedef int (*CallbackGenExtMasterSecret)(WOLFSSL* ssl, byte* hash,
+                                            word32 hashsz, void* ctx);
+WOLFSSL_API void  wolfSSL_CTX_SetGenExtMasterSecretCb(WOLFSSL_CTX* ctx,
+                                                CallbackGenExtMasterSecret cb);
+WOLFSSL_API void  wolfSSL_SetGenExtMasterSecretCtx(WOLFSSL* ssl, void *ctx);
+WOLFSSL_API void* wolfSSL_GetGenExtMasterSecretCtx(WOLFSSL* ssl);
 
 typedef int (*CallbackGenPreMaster)(WOLFSSL* ssl, byte *premaster,
                                                    word32 preSz, void* ctx);

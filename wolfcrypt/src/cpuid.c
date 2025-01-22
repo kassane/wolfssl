@@ -1,6 +1,6 @@
 /* cpuid.c
  *
- * Copyright (C) 2006-2024 wolfSSL Inc.
+ * Copyright (C) 2006-2025 wolfSSL Inc.
  *
  * This file is part of wolfSSL.
  *
@@ -259,8 +259,10 @@
 
             if (features & CPUID_AARCH64_FEAT_AES)
                 cpuid_flags |= CPUID_AES;
-            if (features & CPUID_AARCH64_FEAT_PMULL)
+            if (features & CPUID_AARCH64_FEAT_AES_PMULL) {
+                cpuid_flags |= CPUID_AES;
                 cpuid_flags |= CPUID_PMULL;
+            }
             if (features & CPUID_AARCH64_FEAT_SHA256)
                 cpuid_flags |= CPUID_SHA256;
             if (features & CPUID_AARCH64_FEAT_SHA256_512)
@@ -289,7 +291,7 @@
         #ifdef WOLFSSL_ARMASM_CRYPTO_SHA512
             cpuid_flags |= CPUID_SHA512;
         #endif
-        #ifndef WOLFSSL_AARCH64_NO_SQRMLSH
+        #ifndef WOLFSSL_AARCH64_NO_SQRDMLSH
             cpuid_flags |= CPUID_RDM;
         #endif
         #ifdef WOLFSSL_ARMASM_CRYPTO_SHA3

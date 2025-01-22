@@ -1,6 +1,6 @@
 /* quic.c QUIC unit tests
  *
- * Copyright (C) 2006-2024 wolfSSL Inc.
+ * Copyright (C) 2006-2025 wolfSSL Inc.
  *
  * This file is part of wolfSSL.
  *
@@ -287,7 +287,10 @@ static int test_provide_quic_data(void) {
      */
     AssertNotNull(ssl = wolfSSL_new(ctx));
     len = fake_record(1, 100, lbuffer);
-    AssertTrue(provide_data(ssl, wolfssl_encryption_initial, lbuffer, len, 0));
+    AssertTrue(provide_data(ssl, wolfssl_encryption_initial, lbuffer, 1, 0));
+    AssertTrue(provide_data(ssl, wolfssl_encryption_initial, lbuffer+1, 3, 0));
+    AssertTrue(provide_data(ssl, wolfssl_encryption_initial, lbuffer+4, len, 0)
+            );
     len = fake_record(2, 1523, lbuffer);
     AssertTrue(provide_data(ssl, wolfssl_encryption_handshake, lbuffer, len, 0));
     len = fake_record(2, 1, lbuffer);

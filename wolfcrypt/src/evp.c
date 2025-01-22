@@ -1,6 +1,6 @@
 /* evp.c
  *
- * Copyright (C) 2006-2024 wolfSSL Inc.
+ * Copyright (C) 2006-2025 wolfSSL Inc.
  *
  * This file is part of wolfSSL.
  *
@@ -10884,6 +10884,10 @@ const WOLFSSL_EVP_MD* wolfSSL_EVP_get_digestbynid(int id)
     WOLFSSL_MSG("wolfSSL_get_digestbynid");
 
     switch(id) {
+#ifndef NO_MD4
+        case WC_NID_md4:
+            return wolfSSL_EVP_md4();
+#endif
 #ifndef NO_MD5
         case WC_NID_md5:
             return wolfSSL_EVP_md5();
