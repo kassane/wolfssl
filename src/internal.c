@@ -3023,7 +3023,16 @@ void FreeSSL_Ctx(WOLFSSL_CTX* ctx)
 
     if (isZero) {
         WOLFSSL_MSG("CTX ref count down to 0, doing full free");
-
+#if defined(OPENSSL_EXTRA) && defined(WOLFCRYPT_HAVE_SRP) && \
+    !defined(NO_SHA256) && !defined(WC_NO_RNG)
+        if (ctx->srp != NULL) {
+            XFREE(ctx->srp_password, ctx->heap, DYNAMIC_TYPE_SRP);
+            ctx->srp_password = NULL;
+            wc_SrpTerm(ctx->srp);
+            XFREE(ctx->srp, ctx->heap, DYNAMIC_TYPE_SRP);
+            ctx->srp = NULL;
+        }
+#endif
         SSL_CtxResourceFree(ctx);
 #if defined(HAVE_SESSION_TICKET) && !defined(NO_WOLFSSL_SERVER) && \
     !defined(WOLFSSL_NO_DEF_TICKET_ENC_CB) && !defined(NO_TLS)
@@ -4573,14 +4582,11 @@ void DecodeSigAlg(const byte* input, byte* hashAlgo, byte* hsType)
             }
             break;
     #endif
-#if defined(HAVE_FALCON) || defined(HAVE_DILITHIUM)
-        case PQC_SA_MAJOR:
-            /* Hash performed as part of sign/verify operation.
-             * However, if we want a dual alg signature with a
-             * classic algorithm as alternative, we need an explicit
-             * hash algo here.
-             */
+    /* Hash performed as part of sign/verify operation.
+     * However, if we want a dual alg signature with a classic algorithm as
+     * alternative, we need an explicit hash algo here. */
     #ifdef HAVE_FALCON
+        case FALCON_SA_MAJOR:
             if (input[1] == FALCON_LEVEL1_SA_MINOR) {
                 *hsType = falcon_level1_sa_algo;
                 *hashAlgo = sha256_mac;
@@ -4589,8 +4595,10 @@ void DecodeSigAlg(const byte* input, byte* hashAlgo, byte* hsType)
                 *hsType = falcon_level5_sa_algo;
                 *hashAlgo = sha512_mac;
             }
+            break;
     #endif /* HAVE_FALCON */
     #ifdef HAVE_DILITHIUM
+        case DILITHIUM_SA_MAJOR:
             if (input[1] == DILITHIUM_LEVEL2_SA_MINOR) {
                 *hsType = dilithium_level2_sa_algo;
                 *hashAlgo = sha256_mac;
@@ -4603,9 +4611,8 @@ void DecodeSigAlg(const byte* input, byte* hashAlgo, byte* hsType)
                 *hsType = dilithium_level5_sa_algo;
                 *hashAlgo = sha512_mac;
             }
-    #endif /* HAVE_DILITHIUM */
             break;
-#endif
+    #endif /* HAVE_DILITHIUM */
         default:
             *hashAlgo = input[0];
             *hsType   = input[1];
@@ -6045,8 +6052,14 @@ static int X25519SharedSecret(WOLFSSL* ssl, curve25519_key* priv_key,
     else
 #endif
     {
-        ret = wc_curve25519_shared_secret_ex(priv_key, pub_key, out, outlen,
-                                             EC25519_LITTLE_ENDIAN);
+    #ifdef WOLFSSL_CURVE25519_BLINDING
+        ret = wc_curve25519_set_rng(priv_key, ssl->rng);
+        if (ret == 0)
+    #endif
+        {
+            ret = wc_curve25519_shared_secret_ex(priv_key, pub_key, out, outlen,
+                                                 EC25519_LITTLE_ENDIAN);
+        }
     }
 
     /* Handle async pending response */
@@ -7785,6 +7798,14 @@ int InitSSL(WOLFSSL* ssl, WOLFSSL_CTX* ctx, int writeDup)
             return MEMORY_E;
         }
         XMEMSET(ssl->param, 0, sizeof(WOLFSSL_X509_VERIFY_PARAM));
+
+        /* pass on PARAM flags value from ctx to ssl */
+        if (wolfSSL_X509_VERIFY_PARAM_set_flags(wolfSSL_get0_param(ssl),
+            (unsigned long)wolfSSL_X509_VERIFY_PARAM_get_flags(
+            wolfSSL_CTX_get0_param(ctx))) != WOLFSSL_SUCCESS) {
+            WOLFSSL_MSG("ssl->param set flags error");
+            return WOLFSSL_FAILURE;
+        }
 #endif
 
         if (ctx->suites == NULL) {
@@ -8364,6 +8385,16 @@ void FreeSuites(WOLFSSL* ssl)
         wolfSSL_sk_SSL_CIPHER_free(ssl->suitesStack);
         ssl->suitesStack = NULL;
     }
+    if (ssl->clSuitesStack != NULL) {
+        /* Enough to free stack structure since WOLFSSL_CIPHER
+         * isn't allocated separately. */
+        wolfSSL_sk_SSL_CIPHER_free(ssl->clSuitesStack);
+        ssl->clSuitesStack = NULL;
+    }
+#endif
+#ifdef OPENSSL_EXTRA
+    XFREE(ssl->clSuites, ssl->heap, DYNAMIC_TYPE_SUITES);
+    ssl->clSuites = NULL;
 #endif
     XFREE(ssl->suites, ssl->heap, DYNAMIC_TYPE_SUITES);
     ssl->suites = NULL;
@@ -8731,6 +8762,7 @@ void wolfSSL_ResourceFree(WOLFSSL* ssl)
      * isn't allocated separately. */
     wolfSSL_sk_CIPHER_free(ssl->supportedCiphers);
     wolfSSL_sk_X509_pop_free(ssl->peerCertChain, NULL);
+    wolfSSL_sk_X509_pop_free(ssl->verifiedChain, NULL);
     #ifdef KEEP_OUR_CERT
     wolfSSL_sk_X509_pop_free(ssl->ourCertChain, NULL);
     #endif
@@ -11888,7 +11920,7 @@ static int GetRecordHeader(WOLFSSL* ssl, word32* inOutIdx,
                              (!ssl->options.dtls &&
                               rh->pvMinor < ssl->version.minor))
         #else
-                            rh->pvMinor < ssl->version.minor
+                            (rh->pvMinor < ssl->version.minor)
         #endif
                    )) {
             WOLFSSL_MSG("SSL version error");
@@ -14889,6 +14921,7 @@ static int ProcessPeerCertCheckKey(WOLFSSL* ssl, ProcPeerCertArgs* args)
             break;
     #endif /* HAVE_FALCON */
     #if defined(HAVE_DILITHIUM)
+        #ifdef WOLFSSL_DILITHIUM_FIPS204_DRAFT
         case DILITHIUM_LEVEL2k:
             if (ssl->options.minDilithiumKeySz < 0 ||
                 DILITHIUM_LEVEL2_KEY_SIZE
@@ -14908,6 +14941,31 @@ static int ProcessPeerCertCheckKey(WOLFSSL* ssl, ProcPeerCertArgs* args)
         case DILITHIUM_LEVEL5k:
             if (ssl->options.minDilithiumKeySz < 0 ||
                 DILITHIUM_LEVEL5_KEY_SIZE
+                < (word16)ssl->options.minDilithiumKeySz) {
+                WOLFSSL_MSG("Dilithium key size in cert chain error");
+                ret = DILITHIUM_KEY_SIZE_E;
+            }
+            break;
+        #endif /* WOLFSSL_DILITHIUM_FIPS204_DRAFT */
+        case ML_DSA_LEVEL2k:
+            if (ssl->options.minDilithiumKeySz < 0 ||
+                ML_DSA_LEVEL2_KEY_SIZE
+                < (word16)ssl->options.minDilithiumKeySz) {
+                WOLFSSL_MSG("Dilithium key size in cert chain error");
+                ret = DILITHIUM_KEY_SIZE_E;
+            }
+            break;
+        case ML_DSA_LEVEL3k:
+            if (ssl->options.minDilithiumKeySz < 0 ||
+                ML_DSA_LEVEL3_KEY_SIZE
+                < (word16)ssl->options.minDilithiumKeySz) {
+                WOLFSSL_MSG( "Dilithium key size in cert chain error");
+                ret = DILITHIUM_KEY_SIZE_E;
+            }
+            break;
+        case ML_DSA_LEVEL5k:
+            if (ssl->options.minDilithiumKeySz < 0 ||
+                ML_DSA_LEVEL5_KEY_SIZE
                 < (word16)ssl->options.minDilithiumKeySz) {
                 WOLFSSL_MSG("Dilithium key size in cert chain error");
                 ret = DILITHIUM_KEY_SIZE_E;
@@ -14995,6 +15053,25 @@ static int ProcessPeerCertsChainCRLCheck(WOLFSSL* ssl, ProcPeerCertArgs* args)
 }
 #endif
 
+#ifdef OPENSSL_EXTRA
+/* account for verify params flag set */
+static int AdjustCMForParams(WOLFSSL* ssl)
+{
+    int flags;
+    WOLFSSL_X509_VERIFY_PARAM* param;
+
+    param = wolfSSL_get0_param(ssl);
+    flags = wolfSSL_X509_VERIFY_PARAM_get_flags(param);
+
+    /* For now there is a possible contradiction of PARAM flags and store flags.
+     * Do not disable CRL support if it has already been enabled with store. */
+    if (flags == 0) {
+        return WOLFSSL_SUCCESS;
+    }
+    return wolfSSL_X509_STORE_set_flags(SSL_STORE(ssl), flags);
+}
+#endif
+
 int ProcessPeerCerts(WOLFSSL* ssl, byte* input, word32* inOutIdx,
                      word32 totalSz)
 {
@@ -15062,6 +15139,14 @@ int ProcessPeerCerts(WOLFSSL* ssl, byte* input, word32* inOutIdx,
         ssl->async->freeArgs = FreeProcPeerCertArgs;
     #endif
     }
+
+#ifdef OPENSSL_EXTRA
+    /* account for verify params flag set */
+    if (AdjustCMForParams(ssl) != WOLFSSL_SUCCESS) {
+        WOLFSSL_MSG("Issue with updating store flags from PARAMS set");
+        ERROR_OUT(WOLFSSL_FAILURE, exit_ppc);
+    }
+#endif
 
     switch (ssl->options.asyncState)
     {
@@ -16541,9 +16626,14 @@ int ProcessPeerCerts(WOLFSSL* ssl, byte* input, word32* inOutIdx,
                 #endif /* HAVE_FALCON */
                 #if defined(HAVE_DILITHIUM) && \
                     !defined(WOLFSSL_DILITHIUM_NO_VERIFY)
+                    case ML_DSA_LEVEL2k:
+                    case ML_DSA_LEVEL3k:
+                    case ML_DSA_LEVEL5k:
+                    #ifdef WOLFSSL_DILITHIUM_FIPS204_DRAFT
                     case DILITHIUM_LEVEL2k:
                     case DILITHIUM_LEVEL3k:
                     case DILITHIUM_LEVEL5k:
+                    #endif
                     {
                         int keyRet = 0;
                         if (ssl->peerDilithiumKey == NULL) {
@@ -16557,18 +16647,32 @@ int ProcessPeerCerts(WOLFSSL* ssl, byte* input, word32* inOutIdx,
                         }
 
                         if (keyRet == 0) {
-                            if (args->dCert->keyOID == DILITHIUM_LEVEL2k) {
+                            if (args->dCert->keyOID == ML_DSA_LEVEL2k) {
                                 keyRet = wc_dilithium_set_level(
-                                             ssl->peerDilithiumKey, 2);
+                                             ssl->peerDilithiumKey, WC_ML_DSA_44);
+                            }
+                            else if (args->dCert->keyOID == ML_DSA_LEVEL3k) {
+                                keyRet = wc_dilithium_set_level(
+                                             ssl->peerDilithiumKey, WC_ML_DSA_65);
+                            }
+                            else if (args->dCert->keyOID == ML_DSA_LEVEL5k) {
+                                keyRet = wc_dilithium_set_level(
+                                             ssl->peerDilithiumKey, WC_ML_DSA_87);
+                            }
+                            #ifdef WOLFSSL_DILITHIUM_FIPS204_DRAFT
+                            else if (args->dCert->keyOID == DILITHIUM_LEVEL2k) {
+                                keyRet = wc_dilithium_set_level(
+                                             ssl->peerDilithiumKey, WC_ML_DSA_44_DRAFT);
                             }
                             else if (args->dCert->keyOID == DILITHIUM_LEVEL3k) {
                                 keyRet = wc_dilithium_set_level(
-                                             ssl->peerDilithiumKey, 3);
+                                             ssl->peerDilithiumKey, WC_ML_DSA_65_DRAFT);
                             }
                             else if (args->dCert->keyOID == DILITHIUM_LEVEL5k) {
                                 keyRet = wc_dilithium_set_level(
-                                             ssl->peerDilithiumKey, 5);
+                                             ssl->peerDilithiumKey, WC_ML_DSA_87_DRAFT);
                             }
+                            #endif
                         }
 
                         if (keyRet != 0 ||
@@ -25200,15 +25304,20 @@ static int ssl_in_handshake(WOLFSSL *ssl, int send)
     return 0;
 }
 
-int SendData(WOLFSSL* ssl, const void* data, int sz)
+int SendData(WOLFSSL* ssl, const void* data, size_t sz)
 {
-    int sent = 0,  /* plainText size */
-        sendSz,
+    word32 sent = 0; /* plainText size */
+    int sendSz,
         ret;
 #if defined(WOLFSSL_EARLY_DATA) && defined(WOLFSSL_EARLY_DATA_GROUP)
     int groupMsgs = 0;
 #endif
     int error = ssl->error;
+
+    if (sz > INT_MAX) {
+        WOLFSSL_MSG("SendData sz overflow");
+        return WOLFSSL_FATAL_ERROR;
+    }
 
     if (error == WC_NO_ERR_TRACE(WANT_WRITE)
     #ifdef WOLFSSL_ASYNC_CRYPT
@@ -25314,7 +25423,7 @@ int SendData(WOLFSSL* ssl, const void* data, int sz)
             sent = ssl->buffers.prevSent + ssl->buffers.plainSz;
             WOLFSSL_MSG("sent write buffered data");
 
-            if (sent > sz) {
+            if (sent > (word32)sz) {
                 WOLFSSL_MSG("error: write() after WANT_WRITE with short size");
                 return (ssl->error = BAD_FUNC_ARG);
             }
@@ -25403,19 +25512,19 @@ int SendData(WOLFSSL* ssl, const void* data, int sz)
 
 #ifdef WOLFSSL_DTLS
         if (ssl->options.dtls) {
-            buffSz = wolfSSL_GetMaxFragSize(ssl, sz - sent);
+            buffSz = wolfSSL_GetMaxFragSize(ssl, (word32)sz - sent);
         }
         else
 #endif
         {
-            buffSz = wolfSSL_GetMaxFragSize(ssl, sz - sent);
+            buffSz = wolfSSL_GetMaxFragSize(ssl, (word32)sz - sent);
 
         }
 
-        if (sent == sz) break;
+        if (sent == (word32)sz) break;
 
 #if defined(WOLFSSL_DTLS) && !defined(WOLFSSL_NO_DTLS_SIZE_CHECK)
-        if (ssl->options.dtls && (buffSz < sz - sent)) {
+        if (ssl->options.dtls && ((size_t)buffSz < (word32)sz - sent)) {
             error = DTLS_SIZE_ERROR;
             ssl->error = error;
             WOLFSSL_ERROR(error);
@@ -25571,6 +25680,9 @@ int SendData(WOLFSSL* ssl, const void* data, int sz)
             }
             return error;
         }
+        else {
+            ssl->error = 0; /* Clear any previous errors */
+        }
 
         sent += buffSz;
 
@@ -25586,12 +25698,17 @@ int SendData(WOLFSSL* ssl, const void* data, int sz)
 }
 
 /* process input data */
-int ReceiveData(WOLFSSL* ssl, byte* output, int sz, int peek)
+int ReceiveData(WOLFSSL* ssl, byte* output, size_t sz, int peek)
 {
     int size;
     int error = ssl->error;
 
     WOLFSSL_ENTER("ReceiveData");
+
+    if (sz > INT_MAX) {
+        WOLFSSL_MSG("ReceiveData sz overflow");
+        return WOLFSSL_FATAL_ERROR;
+    }
 
     /* reset error state */
     if (error == WC_NO_ERR_TRACE(WANT_READ) ||
@@ -25742,7 +25859,8 @@ startScr:
 #endif
     }
 
-    size = (int)min((word32)sz, ssl->buffers.clearOutputBuffer.length);
+    size = (sz < (size_t)ssl->buffers.clearOutputBuffer.length) ?
+        (int)sz : (int)ssl->buffers.clearOutputBuffer.length;
 
     XMEMCPY(output, ssl->buffers.clearOutputBuffer.buffer, size);
 
@@ -27708,6 +27826,7 @@ static int ParseCipherList(Suites* suites,
             }
             if (currLen == 0)
                 break;
+            ++next; /* increment to skip ':' */
         }
 
     #if defined(OPENSSL_EXTRA) || defined(OPENSSL_ALL)
@@ -28059,8 +28178,7 @@ static int ParseCipherList(Suites* suites,
                 break;
             }
         }
-    }
-    while (next++); /* increment to skip ':' */
+    } while (next);
 
     if (ret) {
         int keySz = 0;
@@ -28487,6 +28605,7 @@ static int MatchSigAlgo(WOLFSSL* ssl, int sigAlgo)
     }
 #endif /* HAVE_FALCON */
 #ifdef HAVE_DILITHIUM
+    #ifdef WOLFSSL_DILITHIUM_FIPS204_DRAFT
     if (ssl->pkCurveOID == CTC_DILITHIUM_LEVEL2) {
         /* Certificate has Dilithium level 2 key, only match with it. */
         return sigAlgo == dilithium_level2_sa_algo;
@@ -28497,6 +28616,19 @@ static int MatchSigAlgo(WOLFSSL* ssl, int sigAlgo)
     }
     if (ssl->pkCurveOID == CTC_DILITHIUM_LEVEL5) {
         /* Certificate has Dilithium level 5 key, only match with it. */
+        return sigAlgo == dilithium_level5_sa_algo;
+    }
+    #endif /* WOLFSSL_DILITHIUM_FIPS204_DRAFT */
+    if (ssl->pkCurveOID == CTC_ML_DSA_LEVEL2) {
+        /* Certificate has ML-DSA level 2 key, only match with it. */
+        return sigAlgo == dilithium_level2_sa_algo;
+    }
+    if (ssl->pkCurveOID == CTC_ML_DSA_LEVEL3) {
+        /* Certificate has ML-DSA level 3 key, only match with it. */
+        return sigAlgo == dilithium_level3_sa_algo;
+    }
+    if (ssl->pkCurveOID == CTC_ML_DSA_LEVEL5) {
+        /* Certificate has ML-DSA level 5 key, only match with it. */
         return sigAlgo == dilithium_level5_sa_algo;
     }
 #endif /* HAVE_DILITHIUM */
@@ -28661,10 +28793,16 @@ int PickHashSigAlgo(WOLFSSL* ssl, const byte* hashSigAlgo, word32 hashSigAlgoSz,
         }
     #endif /* HAVE_FALCON */
     #if defined(HAVE_DILITHIUM)
-        if (ssl->pkCurveOID == CTC_DILITHIUM_LEVEL2 ||
-            ssl->pkCurveOID == CTC_DILITHIUM_LEVEL3 ||
-            ssl->pkCurveOID == CTC_DILITHIUM_LEVEL5) {
-            /* Matched Dilithium - set chosen and finished. */
+        if (ssl->pkCurveOID == CTC_ML_DSA_LEVEL2 ||
+            ssl->pkCurveOID == CTC_ML_DSA_LEVEL3 ||
+            ssl->pkCurveOID == CTC_ML_DSA_LEVEL5
+            #ifdef WOLFSSL_DILITHIUM_FIPS204_DRAFT
+         || ssl->pkCurveOID == CTC_DILITHIUM_LEVEL2
+         || ssl->pkCurveOID == CTC_DILITHIUM_LEVEL3
+         || ssl->pkCurveOID == CTC_DILITHIUM_LEVEL5
+            #endif /* WOLFSSL_DILITHIUM_FIPS204_DRAFT */
+            ) {
+            /* Matched ML-DSA or Dilithium - set chosen and finished. */
             ssl->options.sigAlgo = sigAlgo;
             ssl->options.hashAlgo = hashAlgo;
             ret = 0;
@@ -29292,13 +29430,13 @@ int DecodePrivateKey(WOLFSSL *ssl, word32* length)
             }
             if (ret == 0) {
                 if (ssl->buffers.keyType == dilithium_level2_sa_algo) {
-                    ret = wc_dilithium_set_level((dilithium_key*)ssl->hsKey, 2);
+                    ret = wc_dilithium_set_level((dilithium_key*)ssl->hsKey, WC_ML_DSA_44);
                 }
                 else if (ssl->buffers.keyType == dilithium_level3_sa_algo) {
-                    ret = wc_dilithium_set_level((dilithium_key*)ssl->hsKey, 3);
+                    ret = wc_dilithium_set_level((dilithium_key*)ssl->hsKey, WC_ML_DSA_65);
                 }
                 else if (ssl->buffers.keyType == dilithium_level5_sa_algo) {
-                    ret = wc_dilithium_set_level((dilithium_key*)ssl->hsKey, 5);
+                    ret = wc_dilithium_set_level((dilithium_key*)ssl->hsKey, WC_ML_DSA_87);
                 }
             }
             if (ret == 0) {
@@ -29632,13 +29770,13 @@ int DecodePrivateKey(WOLFSSL *ssl, word32* length)
         }
 
         if (ssl->buffers.keyType == dilithium_level2_sa_algo) {
-            ret = wc_dilithium_set_level((dilithium_key*)ssl->hsKey, 2);
+            ret = wc_dilithium_set_level((dilithium_key*)ssl->hsKey, WC_ML_DSA_44);
         }
         else if (ssl->buffers.keyType == dilithium_level3_sa_algo) {
-            ret = wc_dilithium_set_level((dilithium_key*)ssl->hsKey, 3);
+            ret = wc_dilithium_set_level((dilithium_key*)ssl->hsKey, WC_ML_DSA_65);
         }
         else if (ssl->buffers.keyType == dilithium_level5_sa_algo) {
-            ret = wc_dilithium_set_level((dilithium_key*)ssl->hsKey, 5);
+            ret = wc_dilithium_set_level((dilithium_key*)ssl->hsKey, WC_ML_DSA_87);
         }
         else {
             /* What if ssl->buffers.keyType is 0? We might want to do something
@@ -29845,15 +29983,15 @@ int DecodeAltPrivateKey(WOLFSSL *ssl, word32* length)
             if (ret == 0) {
                 if (ssl->buffers.altKeyType == dilithium_level2_sa_algo) {
                     ret = wc_dilithium_set_level(
-                                        (dilithium_key*)ssl->hsAltKey, 2);
+                                        (dilithium_key*)ssl->hsAltKey, WC_ML_DSA_44);
                 }
                 else if (ssl->buffers.altKeyType == dilithium_level3_sa_algo) {
                     ret = wc_dilithium_set_level(
-                                        (dilithium_key*)ssl->hsAltKey, 3);
+                                        (dilithium_key*)ssl->hsAltKey, WC_ML_DSA_65);
                 }
                 else if (ssl->buffers.altKeyType == dilithium_level5_sa_algo) {
                     ret = wc_dilithium_set_level(
-                                        (dilithium_key*)ssl->hsAltKey, 5);
+                                        (dilithium_key*)ssl->hsAltKey, WC_ML_DSA_87);
                 }
             }
             if (ret == 0) {
@@ -30064,13 +30202,13 @@ int DecodeAltPrivateKey(WOLFSSL *ssl, word32* length)
         }
 
         if (ssl->buffers.altKeyType == dilithium_level2_sa_algo) {
-            ret = wc_dilithium_set_level((dilithium_key*)ssl->hsAltKey, 2);
+            ret = wc_dilithium_set_level((dilithium_key*)ssl->hsAltKey, WC_ML_DSA_44);
         }
         else if (ssl->buffers.altKeyType == dilithium_level3_sa_algo) {
-            ret = wc_dilithium_set_level((dilithium_key*)ssl->hsAltKey, 3);
+            ret = wc_dilithium_set_level((dilithium_key*)ssl->hsAltKey, WC_ML_DSA_65);
         }
         else if (ssl->buffers.altKeyType == dilithium_level5_sa_algo) {
-            ret = wc_dilithium_set_level((dilithium_key*)ssl->hsAltKey, 5);
+            ret = wc_dilithium_set_level((dilithium_key*)ssl->hsAltKey, WC_ML_DSA_87);
         }
         else {
             /* What if ssl->buffers.keyType is 0? We might want to do something
@@ -37553,11 +37691,6 @@ static int DoSessionTicket(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
     {
         byte            b;
         ProtocolVersion pv;
-#ifdef WOLFSSL_SMALL_STACK
-        Suites*         clSuites = NULL;
-#else
-        Suites          clSuites[1];
-#endif
         word32          i = *inOutIdx;
         word32          begin = i;
         int             ret = 0;
@@ -37855,40 +37988,40 @@ static int DoSessionTicket(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
             goto out;
         }
 
-#ifdef WOLFSSL_SMALL_STACK
-        clSuites = (Suites*)XMALLOC(sizeof(Suites), ssl->heap,
+        XFREE(ssl->clSuites, ssl->heap, DYNAMIC_TYPE_SUITES);
+        ssl->clSuites = (Suites*)XMALLOC(sizeof(Suites), ssl->heap,
                                        DYNAMIC_TYPE_SUITES);
-        if (clSuites == NULL) {
+        if (ssl->clSuites == NULL) {
             ret = MEMORY_E;
             goto out;
         }
-#endif
-        XMEMSET(clSuites, 0, sizeof(Suites));
-        ato16(&input[i], &clSuites->suiteSz);
+        XMEMSET(ssl->clSuites, 0, sizeof(Suites));
+        ato16(&input[i], &ssl->clSuites->suiteSz);
         i += OPAQUE16_LEN;
 
         /* Cipher suite lists are always multiples of two in length. */
-        if (clSuites->suiteSz % 2 != 0) {
+        if (ssl->clSuites->suiteSz % 2 != 0) {
             ret = BUFFER_ERROR;
             goto out;
         }
 
         /* suites and compression length check */
-        if ((i - begin) + clSuites->suiteSz + OPAQUE8_LEN > helloSz) {
+        if ((i - begin) + ssl->clSuites->suiteSz + OPAQUE8_LEN > helloSz) {
             ret = BUFFER_ERROR;
             goto out;
         }
 
-        if (clSuites->suiteSz > WOLFSSL_MAX_SUITE_SZ) {
+        if (ssl->clSuites->suiteSz > WOLFSSL_MAX_SUITE_SZ) {
             ret = BUFFER_ERROR;
             goto out;
         }
 
-        XMEMCPY(clSuites->suites, input + i, clSuites->suiteSz);
+        XMEMCPY(ssl->clSuites->suites, input + i, ssl->clSuites->suiteSz);
 
 #ifdef HAVE_SERVER_RENEGOTIATION_INFO
         /* check for TLS_EMPTY_RENEGOTIATION_INFO_SCSV suite */
-        if (FindSuite(clSuites, 0, TLS_EMPTY_RENEGOTIATION_INFO_SCSV) >= 0) {
+        if (FindSuite(ssl->clSuites, 0, TLS_EMPTY_RENEGOTIATION_INFO_SCSV) >=
+                0) {
             TLSX* extension;
 
             /* check for TLS_EMPTY_RENEGOTIATION_INFO_SCSV suite */
@@ -37910,7 +38043,7 @@ static int DoSessionTicket(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
 #endif /* HAVE_SERVER_RENEGOTIATION_INFO */
 #if defined(HAVE_FALLBACK_SCSV) || defined(OPENSSL_ALL)
         /* check for TLS_FALLBACK_SCSV suite */
-        if (FindSuite(clSuites, TLS_FALLBACK_SCSV, 0) >= 0) {
+        if (FindSuite(ssl->clSuites, TLS_FALLBACK_SCSV, 0) >= 0) {
             WOLFSSL_MSG("Found Fallback SCSV");
             if (ssl->ctx->method->version.minor > pv.minor) {
                 WOLFSSL_MSG("Client trying to connect with lesser version");
@@ -37921,8 +38054,8 @@ static int DoSessionTicket(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
         }
 #endif
 
-        i += clSuites->suiteSz;
-        clSuites->hashSigAlgoSz = 0;
+        i += ssl->clSuites->suiteSz;
+        ssl->clSuites->hashSigAlgoSz = 0;
 
         /* compression length */
         b = input[i++];
@@ -38009,7 +38142,7 @@ static int DoSessionTicket(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
 #ifdef HAVE_TLS_EXTENSIONS
                 /* tls extensions */
                 if ((ret = TLSX_Parse(ssl, input + i, totalExtSz, client_hello,
-                                                                    clSuites)))
+                                                                ssl->clSuites)))
                     goto out;
     #ifdef WOLFSSL_TLS13
                 if (TLSX_Find(ssl->extensions,
@@ -38065,15 +38198,16 @@ static int DoSessionTicket(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
                             goto out;
                         }
 
-                        clSuites->hashSigAlgoSz = hashSigAlgoSz;
-                        if (clSuites->hashSigAlgoSz > WOLFSSL_MAX_SIGALGO) {
+                        ssl->clSuites->hashSigAlgoSz = hashSigAlgoSz;
+                        if (ssl->clSuites->hashSigAlgoSz >
+                                WOLFSSL_MAX_SIGALGO) {
                             WOLFSSL_MSG("ClientHello SigAlgo list exceeds max, "
                                                                   "truncating");
-                            clSuites->hashSigAlgoSz = WOLFSSL_MAX_SIGALGO;
+                            ssl->clSuites->hashSigAlgoSz = WOLFSSL_MAX_SIGALGO;
                         }
 
-                        XMEMCPY(clSuites->hashSigAlgo, &input[i],
-                                                      clSuites->hashSigAlgoSz);
+                        XMEMCPY(ssl->clSuites->hashSigAlgo, &input[i],
+                                                  ssl->clSuites->hashSigAlgoSz);
 
                         i += hashSigAlgoSz;
                     }
@@ -38104,7 +38238,7 @@ static int DoSessionTicket(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
         /* ProcessOld uses same resume code */
         WOLFSSL_MSG_EX("ssl->options.resuming %d", ssl->options.resuming);
         if (ssl->options.resuming) {
-            ret = HandleTlsResumption(ssl, clSuites);
+            ret = HandleTlsResumption(ssl, ssl->clSuites);
             if (ret != 0)
                 goto out;
 
@@ -38140,19 +38274,12 @@ static int DoSessionTicket(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
 #endif
 
 #ifdef OPENSSL_EXTRA
-        ssl->clSuites = clSuites; /* cppcheck-suppress autoVariables
-                                   *
-                                   * (suppress warning that ssl, a persistent
-                                   * non-local allocation, has its ->clSuites
-                                   * set to clSuites, a local stack allocation.
-                                   * we clear this assignment before returning.)
-                                   */
         /* Give user last chance to provide a cert for cipher selection */
         if (ret == 0 && ssl->ctx->certSetupCb != NULL)
             ret = CertSetupCbWrapper(ssl);
 #endif
         if (ret == 0)
-            ret = MatchSuite(ssl, clSuites);
+            ret = MatchSuite(ssl, ssl->clSuites);
 
 #if defined(HAVE_TLS_EXTENSIONS) && defined(HAVE_ENCRYPT_THEN_MAC) && \
     !defined(WOLFSSL_AEAD_ONLY)
@@ -38170,11 +38297,9 @@ static int DoSessionTicket(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
 #endif
 
     out:
-#if defined(OPENSSL_ALL) || defined(WOLFSSL_NGINX) || defined(WOLFSSL_HAPROXY)
+#if !defined(OPENSSL_EXTRA)
+        XFREE(ssl->clSuites, ssl->heap, DYNAMIC_TYPE_SUITES);
         ssl->clSuites = NULL;
-#endif
-#ifdef WOLFSSL_SMALL_STACK
-        XFREE(clSuites, ssl->heap, DYNAMIC_TYPE_SUITES);
 #endif
         WOLFSSL_LEAVE("DoClientHello", ret);
         WOLFSSL_END(WC_FUNC_CLIENT_HELLO_DO);
@@ -39404,8 +39529,19 @@ static int DoSessionTicket(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
                 WOLFSSL_MSG("Found session matching the session id"
                             " found in the ticket");
                 /* Allocate and populate an InternalTicket */
+            #ifdef WOLFSSL_NO_REALLOC
+                tmp = (byte*)XMALLOC(sizeof(InternalTicket), ssl->heap,
+                        DYNAMIC_TYPE_TLSX);
+                if (tmp != NULL && psk->identity != NULL)
+                {
+                   XMEMCPY(tmp, psk->identity, psk->identityLen);
+                   XFREE(psk->identity, ssl->heap, DYNAMIC_TYPE_TLSX);
+                   psk->identity = NULL;
+                }
+            #else
                 tmp = (byte*)XREALLOC(psk->identity, sizeof(InternalTicket),
                         ssl->heap, DYNAMIC_TYPE_TLSX);
+            #endif
                 if (tmp != NULL) {
                     XMEMSET(tmp, 0, sizeof(InternalTicket));
                     psk->identity = tmp;

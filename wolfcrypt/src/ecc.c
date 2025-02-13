@@ -7950,6 +7950,9 @@ int wc_ecc_free(ecc_key* key)
 #endif
 
 #ifdef WOLFSSL_SE050
+#ifdef WOLFSSL_SE050_AUTO_ERASE
+    wc_se050_erase_object(key->keyId);
+#endif
     se050_ecc_free_key(key);
 #endif
 
@@ -9225,6 +9228,7 @@ int wc_ecc_verify_hash_ex(mp_int *r, mp_int *s, const byte* hash,
 #elif defined(WOLFSSL_XILINX_CRYPT_VERSAL)
    byte sigRS[ECC_MAX_CRYPTO_HW_SIZE * 2];
    byte hashcopy[ECC_MAX_CRYPTO_HW_SIZE] = {0};
+#elif defined(WOLFSSL_SE050)
 #else
    int curveLoaded = 0;
    DECLARE_CURVE_SPECS(ECC_CURVE_FIELD_COUNT);
@@ -11366,7 +11370,7 @@ int wc_ecc_import_private_key_ex(const byte* priv, word32 privSz,
 #endif
 
 #ifdef WOLFSSL_MAXQ10XX_CRYPTO
-    if (ret == 0) {
+    if ((ret == 0) && (key->devId != INVALID_DEVID)) {
         ret = wc_MAXQ10XX_EccSetKey(key, key->dp->size);
     }
 #elif defined(WOLFSSL_SILABS_SE_ACCEL)

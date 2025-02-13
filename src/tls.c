@@ -8577,7 +8577,11 @@ static int TLSX_KeyShare_ProcessX25519(WOLFSSL* ssl,
 
     if (ret == 0) {
         ssl->ecdhCurveOID = ECC_X25519_OID;
-
+    #ifdef WOLFSSL_CURVE25519_BLINDING
+        ret = wc_curve25519_set_rng(key, ssl->rng);
+    }
+    if (ret == 0) {
+    #endif
         ret = wc_curve25519_shared_secret_ex(key, peerX25519Key,
                                                    ssl->arrays->preMasterSecret,
                                                    &ssl->arrays->preMasterSz,
@@ -9270,13 +9274,15 @@ int TLSX_KeyShare_Parse(WOLFSSL* ssl, const byte* input, word16 length,
         if (ssl->error != WC_NO_ERR_TRACE(WC_PENDING_E))
     #endif
         {
-            /* Check the selected group was supported by ClientHello extensions. */
+            /* Check the selected group was supported by ClientHello extensions.
+             */
             if (!TLSX_SupportedGroups_Find(ssl, group, ssl->extensions)) {
                 WOLFSSL_ERROR_VERBOSE(BAD_KEY_SHARE_DATA);
                 return BAD_KEY_SHARE_DATA;
             }
 
-            /* Check if the group was sent. */
+            /* Make sure KeyShare for server requested group was not sent in
+             * ClientHello. */
             if (TLSX_KeyShare_Find(ssl, group)) {
                 WOLFSSL_ERROR_VERBOSE(BAD_KEY_SHARE_DATA);
                 return BAD_KEY_SHARE_DATA;

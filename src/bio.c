@@ -389,6 +389,10 @@ int wolfSSL_BIO_read(WOLFSSL_BIO* bio, void* buf, int len)
             #endif
                 break;
 
+            case WOLFSSL_BIO_NULL:
+                ret = 0;
+                break;
+
             } /* switch */
         }
 
@@ -813,6 +817,10 @@ int wolfSSL_BIO_write(WOLFSSL_BIO* bio, const void* data, int len)
             #endif
                 break;
 
+            case WOLFSSL_BIO_NULL:
+                ret = len;
+                break;
+
             } /* switch */
         }
 
@@ -1160,6 +1168,10 @@ int wolfSSL_BIO_gets(WOLFSSL_BIO* bio, char* buf, int sz)
             }
             break;
 #endif /* WOLFCRYPT_ONLY */
+
+        case WOLFSSL_BIO_NULL:
+            ret = 0;
+            break;
 
         default:
             WOLFSSL_MSG("BIO type not supported yet with wolfSSL_BIO_gets");
@@ -1908,7 +1920,7 @@ long wolfSSL_BIO_set_mem_eof_return(WOLFSSL_BIO *bio, int v)
 
 int wolfSSL_BIO_get_len(WOLFSSL_BIO *bio)
 {
-    int len;
+    int len = 0;
 #ifndef NO_FILESYSTEM
     long memSz = 0;
     XFILE file;
@@ -2309,6 +2321,15 @@ int wolfSSL_BIO_flush(WOLFSSL_BIO* bio)
         return &meth;
     }
 
+    WOLFSSL_BIO_METHOD *wolfSSL_BIO_s_null(void)
+    {
+        static WOLFSSL_BIO_METHOD meth =
+                WOLFSSL_BIO_METHOD_INIT(WOLFSSL_BIO_NULL);
+
+        WOLFSSL_ENTER("wolfSSL_BIO_s_null");
+
+        return &meth;
+    }
 
     WOLFSSL_BIO_METHOD *wolfSSL_BIO_s_socket(void)
     {
@@ -2353,7 +2374,6 @@ int wolfSSL_BIO_flush(WOLFSSL_BIO* bio)
 
         WOLFSSL_ENTER("wolfSSL_BIO_new_dgram");
         if (bio) {
-            bio->type  = WOLFSSL_BIO_DGRAM;
             bio->shutdown = (byte)closeF;
             bio->num.fd = (SOCKET_T)fd;
         }
@@ -2770,9 +2790,23 @@ int wolfSSL_BIO_flush(WOLFSSL_BIO* bio)
         }
         else {
             size_t currLen = XSTRLEN(b->ip);
+        #ifdef WOLFSSL_NO_REALLOC
+            char* tmp = NULL;
+        #endif
+
             if (currLen != newLen) {
+        #ifdef WOLFSSL_NO_REALLOC
+                tmp = b->ip;
+                b->ip = (char*)XMALLOC(newLen+1, b->heap, DYNAMIC_TYPE_OPENSSL);
+                if (b->ip != NULL && tmp != NULL) {
+                    XMEMCPY(b->ip, tmp, newLen);
+                    XFREE(tmp, b->heap, DYNAMIC_TYPE_OPENSSL);
+                    tmp = NULL;
+            }
+        #else
                 b->ip = (char*)XREALLOC(b->ip, newLen + 1, b->heap,
                     DYNAMIC_TYPE_OPENSSL);
+        #endif
                 if (b->ip == NULL) {
                     WOLFSSL_MSG("Hostname realloc failed.");
                     return WOLFSSL_FAILURE;

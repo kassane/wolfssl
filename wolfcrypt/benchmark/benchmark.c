@@ -553,6 +553,10 @@
     #endif
 #endif
 
+#ifdef HAVE_ASCON
+    #include <wolfssl/wolfcrypt/ascon.h>
+#endif
+
 #ifdef HAVE_FIPS
     #include <wolfssl/wolfcrypt/fips_test.h>
 
@@ -586,7 +590,7 @@
 #undef LIBCALL_CHECK_RET
 #if defined(NO_STDIO_FILESYSTEM) || defined(NO_ERROR_STRINGS) || \
     defined(NO_MAIN_DRIVER) || defined(BENCH_EMBEDDED)
-#define LIBCALL_CHECK_RET(...) __VA_ARGS__
+#define LIBCALL_CHECK_RET(...) (void)(__VA_ARGS__)
 #else
 #define LIBCALL_CHECK_RET(...) do {                           \
         int _libcall_ret = (__VA_ARGS__);                     \
@@ -669,6 +673,8 @@
 #define BENCH_BLAKE2B            0x00008000
 #define BENCH_BLAKE2S            0x00010000
 #define BENCH_SM3                0x00020000
+#define BENCH_ASCON_HASH256      0x00040000
+#define BENCH_ASCON_AEAD128      0x00080000
 
 /* MAC algorithms. */
 #define BENCH_CMAC               0x00000001
@@ -770,7 +776,8 @@
 #define BENCH_RNG                0x00000001
 #define BENCH_SCRYPT             0x00000002
 
-#if defined(HAVE_AESGCM) || defined(HAVE_AESCCM)
+#if defined(HAVE_AESGCM) || defined(HAVE_AESCCM) || \
+    (defined(HAVE_CHACHA) && defined(HAVE_POLY1305))
 /* Define AES_AUTH_ADD_SZ already here, since it's used in the
  * static declaration of `bench_Usage_msg1`. */
 #if !defined(AES_AUTH_ADD_SZ) && \
@@ -882,6 +889,9 @@ static const bench_alg bench_cipher_opt[] = {
 #ifndef NO_DES3
     { "-des",                BENCH_DES               },
 #endif
+#ifdef HAVE_ASCON
+    { "-ascon-aead",         BENCH_ASCON_AEAD128     },
+#endif
     { NULL, 0 }
 };
 
@@ -948,6 +958,9 @@ static const bench_alg bench_digest_opt[] = {
 #endif
 #ifdef HAVE_BLAKE2S
     { "-blake2s",            BENCH_BLAKE2S           },
+#endif
+#ifdef HAVE_ASCON
+    { "-ascon-hash",         BENCH_ASCON_HASH256     },
 #endif
     { NULL, 0 }
 };
@@ -1947,10 +1960,13 @@ static const char* bench_result_words2[][5] = {
     #define BENCH_MIN_RUNTIME_SEC   1.0F
 #endif
 
+#if defined(HAVE_AESGCM) || defined(HAVE_AESCCM) || \
+    (defined(HAVE_CHACHA) && defined(HAVE_POLY1305))
+    static word32 aesAuthAddSz = AES_AUTH_ADD_SZ;
+#endif
 #if defined(HAVE_AESGCM) || defined(HAVE_AESCCM)
     #define AES_AUTH_TAG_SZ 16
     #define BENCH_CIPHER_ADD AES_AUTH_TAG_SZ
-    static word32 aesAuthAddSz = AES_AUTH_ADD_SZ;
     #if !defined(AES_AAD_OPTIONS_DEFAULT)
         #if !defined(NO_MAIN_DRIVER)
             #define AES_AAD_OPTIONS_DEFAULT 0x1U
@@ -3338,6 +3354,10 @@ static void* benchmarks_do(void* args)
     #endif
     }
 #endif
+#ifdef HAVE_ASCON
+    if (bench_all || (bench_cipher_algs & BENCH_ASCON_AEAD128))
+        bench_ascon_aead();
+#endif
 #ifndef NO_MD5
     if (bench_all || (bench_digest_algs & BENCH_MD5)) {
     #ifndef NO_SW_BENCH
@@ -3510,6 +3530,10 @@ static void* benchmarks_do(void* args)
 #ifdef HAVE_BLAKE2S
     if (bench_all || (bench_digest_algs & BENCH_BLAKE2S))
         bench_blake2s();
+#endif
+#ifdef HAVE_ASCON
+    if (bench_all || (bench_digest_algs & BENCH_ASCON_HASH256))
+        bench_ascon_hash();
 #endif
 #ifdef WOLFSSL_CMAC
     if (bench_all || (bench_mac_algs & BENCH_CMAC)) {
@@ -6061,15 +6085,19 @@ void bench_chacha20_poly1305_aead(void)
     int    ret = 0, i, count;
     DECLARE_MULTI_VALUE_STATS_VARS()
 
+    WC_DECLARE_VAR(bench_additional, byte, AES_AUTH_ADD_SZ, HEAP_HINT);
     WC_DECLARE_VAR(authTag, byte, CHACHA20_POLY1305_AEAD_AUTHTAG_SIZE, HEAP_HINT);
+    WC_ALLOC_VAR(bench_additional, byte, AES_AUTH_ADD_SZ, HEAP_HINT);
     WC_ALLOC_VAR(authTag, byte, CHACHA20_POLY1305_AEAD_AUTHTAG_SIZE, HEAP_HINT);
+    XMEMSET(bench_additional, 0, AES_AUTH_ADD_SZ);
     XMEMSET(authTag, 0, CHACHA20_POLY1305_AEAD_AUTHTAG_SIZE);
 
     bench_stats_start(&count, &start);
     do {
         for (i = 0; i < numBlocks; i++) {
-            ret = wc_ChaCha20Poly1305_Encrypt(bench_key, bench_iv, NULL, 0,
-                bench_plain, bench_size, bench_cipher, authTag);
+            ret = wc_ChaCha20Poly1305_Encrypt(bench_key, bench_iv,
+                bench_additional, aesAuthAddSz, bench_plain, bench_size,
+                bench_cipher, authTag);
             if (ret < 0) {
                 printf("wc_ChaCha20Poly1305_Encrypt error: %d\n", ret);
                 goto exit;
@@ -6091,9 +6119,71 @@ void bench_chacha20_poly1305_aead(void)
 exit:
 
     WC_FREE_VAR(authTag, HEAP_HINT);
+    WC_FREE_VAR(bench_additional, HEAP_HINT);
 }
 #endif /* HAVE_CHACHA && HAVE_POLY1305 */
 
+#ifdef HAVE_ASCON
+
+void bench_ascon_aead(void)
+{
+#define ASCON_AD (byte*)"ADADADADAD"
+#define ASCON_AD_SZ XSTR_SIZEOF(ASCON_AD)
+    double start;
+    int    ret = 0, i, count;
+    WC_DECLARE_VAR(authTag, byte, ASCON_AEAD128_TAG_SZ, HEAP_HINT);
+    WC_DECLARE_VAR(enc, wc_AsconAEAD128, 1, HEAP_HINT);
+    DECLARE_MULTI_VALUE_STATS_VARS()
+
+    WC_ALLOC_VAR(authTag, byte, ASCON_AEAD128_TAG_SZ, HEAP_HINT);
+    XMEMSET(authTag, 0, ASCON_AEAD128_TAG_SZ);
+
+    WC_ALLOC_VAR(enc, wc_AsconAEAD128, 1, HEAP_HINT);
+    XMEMSET(enc, 0, sizeof(wc_AsconAEAD128));
+
+    bench_stats_start(&count, &start);
+    do {
+        for (i = 0; i < numBlocks; i++) {
+            ret = wc_AsconAEAD128_Init(enc);
+            if (ret == 0)
+                ret = wc_AsconAEAD128_SetKey(enc, bench_key);
+            if (ret == 0)
+                ret = wc_AsconAEAD128_SetNonce(enc, bench_iv);
+            if (ret == 0)
+                ret = wc_AsconAEAD128_SetAD(enc, ASCON_AD, ASCON_AD_SZ);
+            if (ret == 0) {
+                ret = wc_AsconAEAD128_EncryptUpdate(enc, bench_cipher,
+                        bench_plain, bench_size);
+            }
+            if (ret == 0)
+                ret = wc_AsconAEAD128_EncryptFinal(enc, authTag);
+            wc_AsconAEAD128_Clear(enc);
+
+            if (ret != 0) {
+                printf("ASCON-AEAD error: %d\n", ret);
+                goto exit;
+            }
+            RECORD_MULTI_VALUE_STATS();
+        }
+        count += i;
+    } while (bench_stats_check(start)
+#ifdef MULTI_VALUE_STATISTICS
+        || runs < minimum_runs
+#endif
+        );
+
+    bench_stats_sym_finish("ASCON-AEAD", 0, count, bench_size, start, ret);
+#ifdef MULTI_VALUE_STATISTICS
+    bench_multi_value_stats(max, min, sum, squareSum, runs);
+#endif
+
+exit:
+
+    WC_FREE_VAR(authTag, HEAP_HINT);
+    WC_FREE_VAR(enc, HEAP_HINT);
+}
+
+#endif /* HAVE_ASCON */
 
 #ifndef NO_MD5
 void bench_md5(int useDeviceID)
@@ -7987,6 +8077,64 @@ void bench_blake2s(void)
 }
 #endif
 
+#ifdef HAVE_ASCON
+void bench_ascon_hash(void)
+{
+    wc_AsconHash256 ascon;
+    byte    digest[ASCON_HASH256_SZ];
+    double  start;
+    int     ret = 0, i, count;
+
+    if (digest_stream) {
+        ret = wc_AsconHash256_Init(&ascon);
+        if (ret != 0) {
+            printf("wc_AsconHash256_Init failed, ret = %d\n", ret);
+            return;
+        }
+
+        bench_stats_start(&count, &start);
+        do {
+            for (i = 0; i < numBlocks; i++) {
+                ret = wc_AsconHash256_Update(&ascon, bench_plain, bench_size);
+                if (ret != 0) {
+                    printf("wc_AsconHash256_Update failed, ret = %d\n", ret);
+                    return;
+                }
+            }
+            ret = wc_AsconHash256_Final(&ascon, digest);
+            if (ret != 0) {
+                printf("wc_AsconHash256_Final failed, ret = %d\n", ret);
+                return;
+            }
+            count += i;
+        } while (bench_stats_check(start));
+    }
+    else {
+        bench_stats_start(&count, &start);
+        do {
+            for (i = 0; i < numBlocks; i++) {
+                ret = wc_AsconHash256_Init(&ascon);
+                if (ret != 0) {
+                    printf("wc_AsconHash256_Init failed, ret = %d\n", ret);
+                    return;
+                }
+                ret = wc_AsconHash256_Update(&ascon, bench_plain, bench_size);
+                if (ret != 0) {
+                    printf("wc_AsconHash256_Update failed, ret = %d\n", ret);
+                    return;
+                }
+                ret = wc_AsconHash256_Final(&ascon, digest);
+                if (ret != 0) {
+                    printf("wc_AsconHash256_Final failed, ret = %d\n", ret);
+                    return;
+                }
+            }
+            count += i;
+        } while (bench_stats_check(start));
+    }
+    bench_stats_sym_finish("ASCON hash", 0, count, bench_size, start, ret);
+}
+#endif
 
 #ifdef WOLFSSL_CMAC
 
@@ -9312,7 +9460,8 @@ void bench_dh(int useDeviceID)
             ret = wc_DhKeyDecode(tmp, &idx, dhKey[i], (word32)bytes);
     #endif
         }
-    #if defined(HAVE_FFDHE_2048) || defined(HAVE_FFDHE_3072)
+    #if defined(HAVE_FFDHE_2048) || defined(HAVE_FFDHE_3072) || \
+        defined(HAVE_FFDHE_4096)
     #ifdef HAVE_PUBLIC_FFDHE
         else if (params != NULL) {
             ret = wc_DhSetKey(dhKey[i], params->p, params->p_len,
@@ -9481,17 +9630,37 @@ exit:
 #endif
 }
 
-static void bench_kyber_encap(const char* name, int keySize, KyberKey* key)
+static void bench_kyber_encap(int type, const char* name, int keySize,
+    KyberKey* key1, KyberKey* key2)
 {
     int ret = 0, times, count, pending = 0;
     double start;
     const char**desc = bench_desc_words[lng_index];
     byte ct[KYBER_MAX_CIPHER_TEXT_SIZE];
     byte ss[KYBER_SS_SZ];
+    byte pub[KYBER_MAX_PUBLIC_KEY_SIZE];
+    word32 pubLen;
     word32 ctSz;
     DECLARE_MULTI_VALUE_STATS_VARS()
 
-    ret = wc_KyberKey_CipherTextSize(key, &ctSz);
+    ret = wc_KyberKey_PublicKeySize(key1, &pubLen);
+    if (ret != 0) {
+        return;
+    }
+    ret = wc_KyberKey_EncodePublicKey(key1, pub, pubLen);
+    if (ret != 0) {
+        return;
+    }
+    ret = wc_KyberKey_Init(type, key2, HEAP_HINT, INVALID_DEVID);
+    if (ret != 0) {
+        return;
+    }
+    ret = wc_KyberKey_DecodePublicKey(key2, pub, pubLen);
+    if (ret != 0) {
+        return;
+    }
+
+    ret = wc_KyberKey_CipherTextSize(key2, &ctSz);
     if (ret != 0) {
         return;
     }
@@ -9502,10 +9671,10 @@ static void bench_kyber_encap(const char* name, int keySize, KyberKey* key)
         /* while free pending slots in queue, submit ops */
         for (times = 0; times < agreeTimes || pending > 0; times++) {
 #ifdef KYBER_NONDETERMINISTIC
-            ret = wc_KyberKey_Encapsulate(key, ct, ss, &gRng);
+            ret = wc_KyberKey_Encapsulate(key2, ct, ss, &gRng);
 #else
             unsigned char rand[KYBER_ENC_RAND_SZ] = {0,};
-            ret = wc_KyberKey_EncapsulateWithRandom(key, ct, ss, rand,
+            ret = wc_KyberKey_EncapsulateWithRandom(key2, ct, ss, rand,
                 sizeof(rand));
 #endif
             if (ret != 0)
@@ -9532,7 +9701,7 @@ exit_encap:
     do {
         /* while free pending slots in queue, submit ops */
         for (times = 0; times < agreeTimes || pending > 0; times++) {
-            ret = wc_KyberKey_Decapsulate(key, ss, ct, ctSz);
+            ret = wc_KyberKey_Decapsulate(key1, ss, ct, ctSz);
             if (ret != 0)
                 goto exit_decap;
             RECORD_MULTI_VALUE_STATS();
@@ -9553,7 +9722,8 @@ exit_decap:
 
 void bench_kyber(int type)
 {
-    KyberKey key;
+    KyberKey key1;
+    KyberKey key2;
     const char* name = NULL;
     int keySize = 0;
 
@@ -9600,10 +9770,11 @@ void bench_kyber(int type)
 #endif
     }
 
-    bench_kyber_keygen(type, name, keySize, &key);
-    bench_kyber_encap(name, keySize, &key);
+    bench_kyber_keygen(type, name, keySize, &key1);
+    bench_kyber_encap(type, name, keySize, &key1, &key2);
 
-    wc_KyberKey_Free(&key);
+    wc_KyberKey_Free(&key2);
+    wc_KyberKey_Free(&key1);
 }
 #endif
 
@@ -9998,6 +10169,9 @@ static void bench_lms_sign_verify(enum wc_LmsParm parm, byte* pub)
     case WC_LMS_PARM_SHA256_192_L1_H10_W8:
     case WC_LMS_PARM_SHA256_192_L1_H15_W2:
     case WC_LMS_PARM_SHA256_192_L1_H15_W4:
+    case WC_LMS_PARM_SHA256_192_L1_H20_W2:
+    case WC_LMS_PARM_SHA256_192_L1_H20_W4:
+    case WC_LMS_PARM_SHA256_192_L1_H20_W8:
     case WC_LMS_PARM_SHA256_192_L2_H10_W2:
     case WC_LMS_PARM_SHA256_192_L2_H10_W4:
     case WC_LMS_PARM_SHA256_192_L2_H10_W8:
@@ -11753,6 +11927,21 @@ void bench_curve25519KeyAgree(int useDeviceID)
         wc_curve25519_free(&genKey);
         return;
     }
+
+#ifdef WOLFSSL_CURVE25519_BLINDING
+   ret = wc_curve25519_set_rng(&genKey, &gRng);
+   if (ret != 0) {
+        wc_curve25519_free(&genKey);
+        wc_curve25519_free(&genKey2);
+        return;
+   }
+   ret = wc_curve25519_set_rng(&genKey2, &gRng);
+   if (ret != 0) {
+        wc_curve25519_free(&genKey);
+        wc_curve25519_free(&genKey2);
+        return;
+   }
+#endif
 
     /* Shared secret */
     bench_stats_start(&count, &start);
@@ -14311,7 +14500,9 @@ void bench_sphincsKeySign(byte level, byte optim)
 #if defined(_WIN32) && !defined(INTIME_RTOS)
 
     #define WIN32_LEAN_AND_MEAN
+    #define _WINSOCKAPI_ /* block inclusion of winsock.h header file */
     #include <windows.h>
+    #undef _WINSOCKAPI_
 
     double current_time(int reset)
     {

@@ -151,15 +151,25 @@
     #include <signal.h>
 #endif
 
-#ifdef USE_WINDOWS_API
+#ifdef __WATCOMC__
+    #if defined(__OS2__)
+    #elif defined(__NT__)
+        #define _WINSOCKAPI_ /* block inclusion of winsock.h header file */
+        #include <windows.h>
+        #undef _WINSOCKAPI_
+    #elif defined(__LINUX__)
+        #ifndef SINGLE_THREADED
+            #define WOLFSSL_PTHREADS
+            #include <pthread.h>
+        #endif
+    #endif
+#elif defined(USE_WINDOWS_API)
     #ifdef WOLFSSL_GAME_BUILD
         #include "system/xtl.h"
     #else
-        #if defined(_WIN32_WCE) || defined(WIN32_LEAN_AND_MEAN)
-            /* On WinCE winsock2.h must be included before windows.h */
-            #include <winsock2.h>
-        #endif
+        #define _WINSOCKAPI_ /* block inclusion of winsock.h header file */
         #include <windows.h>
+        #undef _WINSOCKAPI_
     #endif
 #elif defined(THREADX)
     #ifndef SINGLE_THREADED
@@ -232,7 +242,7 @@
     #endif
     #if defined(OPENSSL_EXTRA) && !defined(NO_FILESYSTEM)
         #ifdef FUSION_RTOS
-           #include <fclunistd.h>
+            #include <fclunistd.h>
         #else
             #include <unistd.h>      /* for close of BIO */
         #endif
@@ -1827,20 +1837,23 @@ enum Misc {
     SM2_SA_MAJOR        = 7,   /* Most significant byte for SM2 with SM3 */
     SM2_SA_MINOR        = 8,   /* Least significant byte for SM2 with SM3 */
 
-    PQC_SA_MAJOR        = 0xFE,/* Most significant byte used with PQC sig algs */
+    FALCON_SA_MAJOR     = 0xFE,/* Most significant byte used with falcon sig algs */
+    DILITHIUM_SA_MAJOR  = 0x09,/* Most significant byte used with dilithium sig algs */
 
-    /* These values for falcon and dilithium match what OQS has defined. */
+    /* These values for falcon match what OQS has defined. */
     FALCON_LEVEL1_SA_MAJOR = 0xFE,
     FALCON_LEVEL1_SA_MINOR = 0xAE,
     FALCON_LEVEL5_SA_MAJOR = 0xFE,
     FALCON_LEVEL5_SA_MINOR = 0xB1,
 
-    DILITHIUM_LEVEL2_SA_MAJOR = 0xFE,
-    DILITHIUM_LEVEL2_SA_MINOR = 0xD0,
-    DILITHIUM_LEVEL3_SA_MAJOR = 0xFE,
-    DILITHIUM_LEVEL3_SA_MINOR = 0xD1,
-    DILITHIUM_LEVEL5_SA_MAJOR = 0xFE,
-    DILITHIUM_LEVEL5_SA_MINOR = 0xD2,
+    /* these values for MLDSA (Dilithium) correspond to what is proposed in the
+     * IETF. */
+    DILITHIUM_LEVEL2_SA_MAJOR = 0x09,
+    DILITHIUM_LEVEL2_SA_MINOR = 0x04,
+    DILITHIUM_LEVEL3_SA_MAJOR = 0x09,
+    DILITHIUM_LEVEL3_SA_MINOR = 0x05,
+    DILITHIUM_LEVEL5_SA_MAJOR = 0x09,
+    DILITHIUM_LEVEL5_SA_MINOR = 0x06,
 
     MIN_RSA_SHA512_PSS_BITS = 512 * 2 + 8 * 8, /* Min key size */
     MIN_RSA_SHA384_PSS_BITS = 384 * 2 + 8 * 8, /* Min key size */
@@ -4801,9 +4814,9 @@ typedef struct Buffers {
     buffer          clearOutputBuffer;
     buffer          sig;                   /* signature data */
     buffer          digest;                /* digest data */
-    int             prevSent;              /* previous plain text bytes sent
+    word32          prevSent;              /* previous plain text bytes sent
                                               when got WANT_WRITE            */
-    int             plainSz;               /* plain text bytes in buffer to send
+    word32          plainSz;               /* plain text bytes in buffer to send
                                               when got WANT_WRITE            */
     byte            weOwnCert;             /* SSL own cert flag */
     byte            weOwnCertChain;        /* SSL own cert chain flag */
@@ -5785,13 +5798,13 @@ struct WOLFSSL {
                              * reusing the context's object. When WOLFSSL
                              * object needs separate instance of suites use
                              * AllocateSuites(). */
-#ifdef OPENSSL_EXTRA
-    const Suites*   clSuites;
-#endif
+    Suites*         clSuites;
 #if defined(OPENSSL_EXTRA) || defined(OPENSSL_ALL) || \
     defined(WOLFSSL_NGINX) || defined(WOLFSSL_HAPROXY)
     WOLF_STACK_OF(WOLFSSL_CIPHER)* suitesStack; /* stack of available cipher
                                                  * suites */
+    WOLF_STACK_OF(WOLFSSL_CIPHER)* clSuitesStack; /* stack of client cipher
+                                                   * suites */
 #endif
     Arrays*         arrays;
 #ifdef WOLFSSL_TLS13
@@ -6227,6 +6240,7 @@ struct WOLFSSL {
 #if defined(OPENSSL_EXTRA)
     WOLFSSL_STACK* supportedCiphers; /* Used in wolfSSL_get_ciphers_compat */
     WOLFSSL_STACK* peerCertChain;    /* Used in wolfSSL_get_peer_cert_chain */
+    WOLFSSL_STACK* verifiedChain;    /* peer cert chain to CA */
 #ifdef KEEP_OUR_CERT
     WOLFSSL_STACK* ourCertChain;    /* Used in wolfSSL_add1_chain_cert */
 #endif
@@ -6499,7 +6513,7 @@ WOLFSSL_LOCAL int DoClientTicket_ex(const WOLFSSL* ssl, PreSharedKey* psk,
 
 WOLFSSL_LOCAL int DoClientTicket(WOLFSSL* ssl, const byte* input, word32 len);
 #endif /* HAVE_SESSION_TICKET */
-WOLFSSL_LOCAL int SendData(WOLFSSL* ssl, const void* data, int sz);
+WOLFSSL_LOCAL int SendData(WOLFSSL* ssl, const void* data, size_t sz);
 #ifdef WOLFSSL_THREADED_CRYPT
 WOLFSSL_LOCAL int SendAsyncData(WOLFSSL* ssl);
 #endif
@@ -6520,7 +6534,7 @@ WOLFSSL_LOCAL int SendHelloRequest(WOLFSSL* ssl);
 WOLFSSL_LOCAL int SendCertificateStatus(WOLFSSL* ssl);
 WOLFSSL_LOCAL int SendServerKeyExchange(WOLFSSL* ssl);
 WOLFSSL_LOCAL int SendBuffered(WOLFSSL* ssl);
-WOLFSSL_LOCAL int ReceiveData(WOLFSSL* ssl, byte* output, int sz, int peek);
+WOLFSSL_LOCAL int ReceiveData(WOLFSSL* ssl, byte* output, size_t sz, int peek);
 WOLFSSL_LOCAL int SendFinished(WOLFSSL* ssl);
 WOLFSSL_LOCAL int RetrySendAlert(WOLFSSL* ssl);
 WOLFSSL_LOCAL int SendAlert(WOLFSSL* ssl, int severity, int type);

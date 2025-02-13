@@ -481,6 +481,24 @@ int wolfSSL_X509_get_ext_by_OBJ(const WOLFSSL_X509 *x,
     return WOLFSSL_FATAL_ERROR;
 }
 
+
+int wolfSSL_X509_OBJECT_set1_X509(WOLFSSL_X509_OBJECT *a, WOLFSSL_X509 *obj)
+{
+    WOLFSSL_STUB("wolfSSL_X509_OBJECT_set1_X509");
+    (void)a;
+    (void)obj;
+    return 0;
+}
+
+int wolfSSL_X509_OBJECT_set1_X509_CRL(WOLFSSL_X509_OBJECT *a,
+    WOLFSSL_X509_CRL *obj)
+{
+    WOLFSSL_STUB("wolfSSL_X509_OBJECT_set1_X509_CRL");
+    (void)a;
+    (void)obj;
+    return 0;
+}
+
 #endif /* OPENSSL_ALL || OPENSSL_EXTRA */
 
 #if defined(OPENSSL_ALL) || defined(OPENSSL_EXTRA) || \
@@ -1181,12 +1199,24 @@ WOLFSSL_X509_EXTENSION* wolfSSL_X509_set_ext(WOLFSSL_X509* x509, int loc)
                     }
                 }
 
-                ext->obj->objSz = (unsigned int)objSz;
                 if (((ext->obj->dynamic & WOLFSSL_ASN1_DYNAMIC_DATA) != 0) ||
                     (ext->obj->obj == NULL)) {
-                        ext->obj->obj =(byte*)XREALLOC((byte*)ext->obj->obj,
-                                             ext->obj->objSz,
-                                             NULL,DYNAMIC_TYPE_ASN1);
+                #ifdef WOLFSSL_NO_REALLOC
+                    byte* tmp = NULL;
+
+                    tmp = (byte*)XMALLOC(objSz, NULL, DYNAMIC_TYPE_ASN1);
+                    if (tmp != NULL && ext->obj->obj != NULL) {
+                        XMEMCPY(tmp, ext->obj->obj, ext->obj->objSz);
+                        XFREE((byte*)ext->obj->obj, NULL, DYNAMIC_TYPE_ASN1);
+                    }
+                    else if (tmp == NULL) {
+                        ext->obj->obj = tmp;
+                    }
+                    ext->obj->obj = tmp;
+                #else
+                    ext->obj->obj = (byte*)XREALLOC((byte*)ext->obj->obj, objSz,
+                                           NULL, DYNAMIC_TYPE_ASN1);
+                #endif
                     if (ext->obj->obj == NULL) {
                         wolfSSL_X509_EXTENSION_free(ext);
                         FreeDecodedCert(cert);
@@ -1201,6 +1231,8 @@ WOLFSSL_X509_EXTENSION* wolfSSL_X509_set_ext(WOLFSSL_X509* x509, int loc)
                 else {
                     ext->obj->dynamic &= ~WOLFSSL_ASN1_DYNAMIC_DATA;
                 }
+                ext->obj->objSz = (unsigned int)objSz;
+
                 /* Get OID from input and copy to ASN1_OBJECT buffer */
                 XMEMCPY(oidBuf+2, input+idx, length);
                 XMEMCPY((byte*)ext->obj->obj, oidBuf, ext->obj->objSz);
@@ -1663,10 +1695,10 @@ int wolfSSL_X509_EXTENSION_set_critical(WOLFSSL_X509_EXTENSION* ex, int crit)
  * Returns NULL on error or pointer to the v3_ext_method populated with
  * extension type-specific X509V3_EXT_* function(s).
  *
- * NOTE: WC_NID_subject_key_identifier is currently the only extension implementing
- * the X509V3_EXT_* functions, as it is the only type called directly by QT. The
- * other extension types return a pointer to a v3_ext_method struct that
- * contains only the NID.
+ * NOTE: WC_NID_subject_key_identifier is currently the only extension
+ * implementing the X509V3_EXT_* functions, as it is the only type called
+ * directly by QT. The other extension types return a pointer to a
+ * v3_ext_method struct that contains only the NID.
  */
 #if defined(OPENSSL_VERSION_NUMBER) && OPENSSL_VERSION_NUMBER >= 0x10100000L
 const WOLFSSL_v3_ext_method* wolfSSL_X509V3_EXT_get(WOLFSSL_X509_EXTENSION* ex)
@@ -4527,7 +4559,8 @@ error:
  *          WOLFSSL_SUCCESS otherwise.
  */
 int wolfSSL_GENERAL_NAME_set0_othername(WOLFSSL_GENERAL_NAME* gen,
-                                        WOLFSSL_ASN1_OBJECT* oid, WOLFSSL_ASN1_TYPE* value)
+                                        WOLFSSL_ASN1_OBJECT* oid,
+                                        WOLFSSL_ASN1_TYPE* value)
 {
     WOLFSSL_ASN1_OBJECT *x = NULL;
 
@@ -5267,7 +5300,8 @@ WOLFSSL_X509* wolfSSL_X509_load_certificate_file(const char* fname, int format)
 #endif /* !NO_FILESYSTEM */
 
 static WOLFSSL_X509* loadX509orX509REQFromBuffer(
-    const unsigned char* buf, int sz, int format, int type)
+    const unsigned char* buf, int sz, int format, int type,
+    wc_pem_password_cb *cb, void *u)
 {
 
     int ret = 0;
@@ -5277,8 +5311,15 @@ static WOLFSSL_X509* loadX509orX509REQFromBuffer(
     WOLFSSL_ENTER("wolfSSL_X509_load_certificate_ex");
 
     if (format == WOLFSSL_FILETYPE_PEM) {
+        EncryptedInfo info;
+        XMEMSET(&info, 0, sizeof(EncryptedInfo));
+    #ifdef WOLFSSL_ENCRYPTED_KEYS
+        info.passwd_cb       = cb;
+        info.passwd_userdata = u;
+    #endif
+
     #ifdef WOLFSSL_PEM_TO_DER
-        ret = PemToDer(buf, sz, type, &der, NULL, NULL, NULL);
+        ret = PemToDer(buf, sz, type, &der, NULL, &info, NULL);
         if (ret != 0) {
             FreeDer(&der);
         }
@@ -5342,6 +5383,9 @@ static WOLFSSL_X509* loadX509orX509REQFromBuffer(
         WOLFSSL_ERROR(ret);
     }
 
+    /* unused parameter when built without WOLFSSL_ENCRYPTED_KEYS */
+    (void)cb;
+    (void)u;
     return x509;
 }
 
@@ -5349,7 +5393,7 @@ WOLFSSL_X509* wolfSSL_X509_load_certificate_buffer(
     const unsigned char* buf, int sz, int format)
 {
     return loadX509orX509REQFromBuffer(buf, sz,
-            format, CERT_TYPE);
+            format, CERT_TYPE, NULL, NULL);
 }
 
 #ifdef WOLFSSL_CERT_REQ
@@ -5357,7 +5401,7 @@ WOLFSSL_X509* wolfSSL_X509_REQ_load_certificate_buffer(
     const unsigned char* buf, int sz, int format)
 {
     return loadX509orX509REQFromBuffer(buf, sz,
-            format, CERTREQ_TYPE);
+            format, CERTREQ_TYPE, NULL, NULL);
 }
 #endif
 
@@ -8041,10 +8085,21 @@ int wolfSSL_i2d_X509(WOLFSSL_X509* x509, unsigned char** out)
 }
 
 #ifdef WOLFSSL_DUAL_ALG_CERTS
+/* Generate a der preTBS from a decoded cert, and write
+ * to buffer.
+ *
+ * @param [in]  cert  The decoded cert to parse.
+ * @param [out] der   The der buffer to write in.
+ * @param [in]  derSz The der buffer size.
+ *
+ * @return  preTBS der size on success.
+ * */
 int wc_GeneratePreTBS(DecodedCert* cert, byte *der, int derSz) {
     int ret = 0;
     WOLFSSL_X509 *x = NULL;
     byte certIsCSR = 0;
+
+    WOLFSSL_ENTER("wc_GeneratePreTBS");
 
     if ((cert == NULL) || (der == NULL) || (derSz <= 0)) {
         return BAD_FUNC_ARG;
@@ -10342,6 +10397,19 @@ WOLF_STACK_OF(WOLFSSL_X509)* wolfSSL_X509_chain_up_ref(
 }
 #endif
 
+#if defined(OPENSSL_EXTRA)
+
+WOLF_STACK_OF(WOLFSSL_X509_OBJECT)* wolfSSL_sk_X509_OBJECT_deep_copy(
+    const WOLF_STACK_OF(WOLFSSL_X509_OBJECT)* sk,
+    WOLFSSL_X509_OBJECT* (*c)(const WOLFSSL_X509_OBJECT*),
+    void (*f)(WOLFSSL_X509_OBJECT*))
+{
+    (void)f; /* free function */
+    (void)c; /* copy function */
+    return wolfSSL_sk_dup((WOLFSSL_STACK*)sk);
+}
+#endif
+
 #if defined(OPENSSL_EXTRA) || defined(OPENSSL_EXTRA_X509_SMALL)
     void wolfSSL_X509_NAME_free(WOLFSSL_X509_NAME *name)
     {
@@ -11051,9 +11119,15 @@ static int CertFromX509(Cert* cert, WOLFSSL_X509* x509)
         }
     #endif
     #if defined(HAVE_DILITHIUM)
-        if ((x509->pubKeyOID == DILITHIUM_LEVEL2k) ||
-            (x509->pubKeyOID == DILITHIUM_LEVEL3k) ||
-            (x509->pubKeyOID == DILITHIUM_LEVEL5k)) {
+        if ((x509->pubKeyOID == ML_DSA_LEVEL2k) ||
+            (x509->pubKeyOID == ML_DSA_LEVEL3k) ||
+            (x509->pubKeyOID == ML_DSA_LEVEL5k)
+            #ifdef WOLFSSL_DILITHIUM_FIPS204_DRAFT
+         || (x509->pubKeyOID == DILITHIUM_LEVEL2k)
+         || (x509->pubKeyOID == DILITHIUM_LEVEL3k)
+         || (x509->pubKeyOID == DILITHIUM_LEVEL5k)
+            #endif /* WOLFSSL_DILITHIUM_FIPS204_DRAFT */
+            ) {
             dilithium = (dilithium_key*)XMALLOC(sizeof(dilithium_key), NULL,
                                           DYNAMIC_TYPE_DILITHIUM);
             if (dilithium == NULL) {
@@ -11069,18 +11143,32 @@ static int CertFromX509(Cert* cert, WOLFSSL_X509* x509)
                 return ret;
             }
 
-            if (x509->pubKeyOID == DILITHIUM_LEVEL2k) {
+            if (x509->pubKeyOID == ML_DSA_LEVEL2k) {
+                type = ML_DSA_LEVEL2_TYPE;
+                wc_dilithium_set_level(dilithium, WC_ML_DSA_44);
+            }
+            else if (x509->pubKeyOID == ML_DSA_LEVEL3k) {
+                type = ML_DSA_LEVEL3_TYPE;
+                wc_dilithium_set_level(dilithium, WC_ML_DSA_65);
+            }
+            else if (x509->pubKeyOID == ML_DSA_LEVEL5k) {
+                type = ML_DSA_LEVEL5_TYPE;
+                wc_dilithium_set_level(dilithium, WC_ML_DSA_87);
+            }
+            #ifdef WOLFSSL_DILITHIUM_FIPS204_DRAFT
+            else if (x509->pubKeyOID == DILITHIUM_LEVEL2k) {
                 type = DILITHIUM_LEVEL2_TYPE;
-                wc_dilithium_set_level(dilithium, 2);
+                wc_dilithium_set_level(dilithium, WC_ML_DSA_44_DRAFT);
             }
             else if (x509->pubKeyOID == DILITHIUM_LEVEL3k) {
                 type = DILITHIUM_LEVEL3_TYPE;
-                wc_dilithium_set_level(dilithium, 3);
+                wc_dilithium_set_level(dilithium, WC_ML_DSA_65_DRAFT);
             }
             else if (x509->pubKeyOID == DILITHIUM_LEVEL5k) {
                 type = DILITHIUM_LEVEL5_TYPE;
-                wc_dilithium_set_level(dilithium, 5);
+                wc_dilithium_set_level(dilithium, WC_ML_DSA_87_DRAFT);
             }
+            #endif /* WOLFSSL_DILITHIUM_FIPS204_DRAFT */
 
             ret = wc_Dilithium_PublicKeyDecode(x509->pubKey.buffer, &idx,
                                     dilithium, x509->pubKey.length);
@@ -11261,9 +11349,15 @@ cleanup:
         }
     #endif
     #if defined(HAVE_DILITHIUM)
-        if ((x509->pubKeyOID == DILITHIUM_LEVEL2k) ||
-            (x509->pubKeyOID == DILITHIUM_LEVEL3k) ||
-            (x509->pubKeyOID == DILITHIUM_LEVEL5k)) {
+        if ((x509->pubKeyOID == ML_DSA_LEVEL2k) ||
+            (x509->pubKeyOID == ML_DSA_LEVEL3k) ||
+            (x509->pubKeyOID == ML_DSA_LEVEL5k)
+        #ifdef WOLFSSL_DILITHIUM_FIPS204_DRAFT
+         || (x509->pubKeyOID == DILITHIUM_LEVEL2k)
+         || (x509->pubKeyOID == DILITHIUM_LEVEL3k)
+         || (x509->pubKeyOID == DILITHIUM_LEVEL5k)
+        #endif
+        ) {
             wc_dilithium_free(dilithium);
             XFREE(dilithium, NULL, DYNAMIC_TYPE_DILITHIUM);
         }
@@ -11940,12 +12034,12 @@ static WOLFSSL_X509 *loadX509orX509REQFromPemBio(WOLFSSL_BIO *bp,
         pemSz = (int)i;
     #ifdef WOLFSSL_CERT_REQ
         if (type == CERTREQ_TYPE)
-            x509 = wolfSSL_X509_REQ_load_certificate_buffer(pem, pemSz,
-                                                      WOLFSSL_FILETYPE_PEM);
+            x509 = loadX509orX509REQFromBuffer(pem, pemSz, WOLFSSL_FILETYPE_PEM,
+                CERTREQ_TYPE, cb, u);
         else
     #endif
-            x509 = wolfSSL_X509_load_certificate_buffer(pem, pemSz,
-                                                      WOLFSSL_FILETYPE_PEM);
+            x509 = loadX509orX509REQFromBuffer(pem, pemSz, WOLFSSL_FILETYPE_PEM,
+                CERT_TYPE, cb, u);
     }
 
     if (x != NULL) {
@@ -12670,6 +12764,7 @@ err:
         return ne;
     }
 
+
     static void wolfssl_x509_name_entry_set(WOLFSSL_X509_NAME_ENTRY* ne,
         int nid, int type, const unsigned char *data, int dataSz)
     {
@@ -13073,6 +13168,17 @@ WOLFSSL_ASN1_OBJECT* wolfSSL_X509_NAME_ENTRY_get_object(
 
 #if defined(OPENSSL_EXTRA) || defined(WOLFSSL_WPAS_SMALL) || \
     defined(OPENSSL_EXTRA_X509_SMALL)
+
+#ifdef OPENSSL_EXTRA
+    int wolfSSL_X509_NAME_ENTRY_set(const WOLFSSL_X509_NAME_ENTRY *ne)
+    {
+        if (ne != NULL) {
+            return ne->set;
+        }
+        return 0;
+    }
+#endif
+
 
     /* returns a pointer to the internal entry at location 'loc' on success,
      * a null pointer is returned in fail cases */
@@ -13847,7 +13953,8 @@ int wolfSSL_X509_NAME_print_ex(WOLFSSL_BIO* bio, WOLFSSL_X509_NAME* name,
         int tmpSz;
 
         /* reverse name order for RFC2253 and DN_REV */
-        if ((flags & WOLFSSL_XN_FLAG_RFC2253) || (flags & WOLFSSL_XN_FLAG_DN_REV)) {
+        if ((flags & WOLFSSL_XN_FLAG_RFC2253) ||
+            (flags & WOLFSSL_XN_FLAG_DN_REV)) {
             ne = wolfSSL_X509_NAME_get_entry(name, count - i - 1);
         }
         else {
@@ -15637,6 +15744,17 @@ int wolfSSL_X509_ACERT_verify(WOLFSSL_X509_ACERT* x509, WOLFSSL_EVP_PKEY* pkey)
     return ret == 0 ? WOLFSSL_SUCCESS : WOLFSSL_FAILURE;
 }
 
+/* Loads an x509 attribute certificate from buffer, and returns
+ * pointer to new WOLFSSL_X509_ACERT struct on success.
+ *
+ * @param [in]  buf    The acert buffer to load.
+ * @param [in]  sz     The size of the buffer.
+ * @param [in]  format The format of the buffer data.
+ * @param [in]  heap   Dynamic memory allocation hint.
+ *
+ * @return  pointer to WOLFSSL_X509_ACERT on success.
+ * @return  NULL on error.
+ * */
 WOLFSSL_X509_ACERT * wolfSSL_X509_ACERT_load_certificate_buffer_ex(
     const unsigned char* buf, int sz, int format, void * heap)
 {

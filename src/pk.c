@@ -518,8 +518,19 @@ static int der_to_enc_pem_alloc(unsigned char* der, int derSz,
         byte *tmpBuf;
 
         /* Add space for padding. */
+    #ifdef WOLFSSL_NO_REALLOC
+        tmpBuf = (byte*)XMALLOC((size_t)(derSz + blockSz), heap,
+            DYNAMIC_TYPE_TMP_BUFFER);
+        if (tmpBuf != NULL && der != NULL)
+        {
+                XMEMCPY(tmpBuf, der, (size_t)(derSz));
+                XFREE(der, heap, DYNAMIC_TYPE_TMP_BUFFER);
+                der = NULL;
+        }
+    #else
         tmpBuf = (byte*)XREALLOC(der, (size_t)(derSz + blockSz), heap,
             DYNAMIC_TYPE_TMP_BUFFER);
+    #endif
         if (tmpBuf == NULL) {
             WOLFSSL_ERROR_MSG("Extending DER buffer failed");
             ret = 0; /* der buffer is free'd at the end of the function */
@@ -1547,7 +1558,11 @@ static int wolfssl_read_der_bio(WOLFSSL_BIO* bio, unsigned char** out)
         WOLFSSL_ERROR_MSG("Malloc failure");
         err = 1;
     }
-    if (!err) {
+    if ((!err) && (derLen <= (int)sizeof(seq))) {
+        /* Copy the previously read data into the buffer. */
+        XMEMCPY(der, seq, derLen);
+    }
+    else if (!err) {
         /* Calculate the unread amount. */
         int len = derLen - (int)sizeof(seq);
         /* Copy the previously read data into the buffer. */
@@ -12234,7 +12249,7 @@ int wolfSSL_i2o_ECPublicKey(const WOLFSSL_EC_KEY *key, unsigned char **out)
     if (ret == 1) {
     #ifdef HAVE_COMP_KEY
         /* Default to compressed form if not set */
-        form = (key->form != WC_POINT_CONVERSION_UNCOMPRESSED) ?
+        form = (key->form == WC_POINT_CONVERSION_UNCOMPRESSED) ?
                WC_POINT_CONVERSION_UNCOMPRESSED :
                WC_POINT_CONVERSION_COMPRESSED;
     #endif
@@ -14652,6 +14667,13 @@ int wolfSSL_EC25519_shared_key(unsigned char *shared, unsigned int *sharedSz,
         res = 0;
     }
     if (res) {
+    #ifdef WOLFSSL_CURVE25519_BLINDING
+        /* An RNG is needed. */
+        if (wc_curve25519_set_rng(&privkey, wolfssl_make_global_rng()) != 0) {
+            res = 0;
+        }
+        else
+    #endif
         /* Initialize public key object. */
         if (wc_curve25519_init(&pubkey) != MP_OKAY) {
             WOLFSSL_MSG("wc_curve25519_init pubkey failed");

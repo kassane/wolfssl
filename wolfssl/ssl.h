@@ -76,7 +76,7 @@
 #endif
 
 #ifdef OPENSSL_ALL
-    #ifndef WOLFSSL_HAVE_BIO_ADDR
+    #if !defined(WOLFSSL_HAVE_BIO_ADDR) && !defined(WOLFSSL_NO_SOCK)
     #define WOLFSSL_HAVE_BIO_ADDR
     #endif
     #if defined(WOLFSSL_DTLS) && !defined(WOLFSSL_DTLS_MTU)
@@ -327,6 +327,7 @@ typedef int (*WOLFSSL_X509_STORE_CTX_get_crl_cb)(WOLFSSL_X509_STORE_CTX *,
 typedef int (*WOLFSSL_X509_STORE_CTX_check_crl_cb)(WOLFSSL_X509_STORE_CTX *,
         WOLFSSL_X509_CRL *);
 
+#define WOLFSSL_V_ASN1_BIT_STRING                0x03
 #define WOLFSSL_V_ASN1_INTEGER                   0x02
 #define WOLFSSL_V_ASN1_NEG                       0x100
 #define WOLFSSL_V_ASN1_NEG_INTEGER               (2 | WOLFSSL_V_ASN1_NEG)
@@ -603,7 +604,7 @@ struct WOLFSSL_EVP_PKEY {
 
 typedef struct WOLFSSL_BUFFER_INFO {
     unsigned char* buffer;
-    unsigned int length;
+    word32 length;
 } WOLFSSL_BUFFER_INFO;
 
 typedef struct WOLFSSL_BUF_MEM {
@@ -706,7 +707,8 @@ enum BIO_TYPE {
     WOLFSSL_BIO_FILE   = 6,
     WOLFSSL_BIO_BASE64 = 7,
     WOLFSSL_BIO_MD     = 8,
-    WOLFSSL_BIO_DGRAM  = 9
+    WOLFSSL_BIO_DGRAM  = 9,
+    WOLFSSL_BIO_NULL   = 10
 };
 
 enum BIO_FLAGS {
@@ -1364,7 +1366,10 @@ WOLFSSL_API int wolfSSL_get_wfd(const WOLFSSL* ssl);
 WOLFSSL_ABI WOLFSSL_API int  wolfSSL_connect(WOLFSSL* ssl);
 WOLFSSL_ABI WOLFSSL_API int  wolfSSL_write(
     WOLFSSL* ssl, const void* data, int sz);
+WOLFSSL_API int wolfSSL_write_ex(WOLFSSL* ssl, const void* data, size_t sz,
+    size_t* wr);
 WOLFSSL_ABI WOLFSSL_API int  wolfSSL_read(WOLFSSL* ssl, void* data, int sz);
+WOLFSSL_API int wolfSSL_read_ex(WOLFSSL* ssl, void* data, size_t sz, size_t* rd);
 WOLFSSL_API int  wolfSSL_peek(WOLFSSL* ssl, void* data, int sz);
 WOLFSSL_ABI WOLFSSL_API int  wolfSSL_accept(WOLFSSL* ssl);
 WOLFSSL_API int wolfSSL_inject(WOLFSSL* ssl, const void* data, int sz);
@@ -2043,6 +2048,7 @@ WOLFSSL_API WOLFSSL_BIO *wolfSSL_BIO_new_fd(int fd, int close_flag);
 WOLFSSL_API WOLFSSL_BIO_METHOD *wolfSSL_BIO_s_bio(void);
 WOLFSSL_API WOLFSSL_BIO_METHOD *wolfSSL_BIO_s_socket(void);
 WOLFSSL_API WOLFSSL_BIO_METHOD *wolfSSL_BIO_s_datagram(void);
+WOLFSSL_API WOLFSSL_BIO_METHOD *wolfSSL_BIO_s_null(void);
 
 WOLFSSL_API WOLFSSL_BIO *wolfSSL_BIO_new_connect(const char *str);
 WOLFSSL_API WOLFSSL_BIO *wolfSSL_BIO_new_accept(const char *port);
@@ -2262,9 +2268,8 @@ WOLFSSL_API WOLFSSL_X509_STORE_CTX *wolfSSL_X509_STORE_CTX_get0_parent_ctx(
                                                    WOLFSSL_X509_STORE_CTX *ctx);
 WOLFSSL_API int wolfSSL_X509_STORE_set_flags(WOLFSSL_X509_STORE* store,
                                                             unsigned long flag);
-WOLFSSL_API int          wolfSSL_X509_STORE_set_default_paths(WOLFSSL_X509_STORE* store);
-WOLFSSL_API int          wolfSSL_X509_STORE_get_by_subject(WOLFSSL_X509_STORE_CTX* ctx,
-                                   int idx, WOLFSSL_X509_NAME* name, WOLFSSL_X509_OBJECT* obj);
+WOLFSSL_API int wolfSSL_X509_STORE_get_by_subject(WOLFSSL_X509_STORE_CTX* ctx,
+                    int idx, WOLFSSL_X509_NAME* name, WOLFSSL_X509_OBJECT* obj);
 WOLFSSL_API WOLFSSL_X509_VERIFY_PARAM *wolfSSL_X509_STORE_CTX_get0_param(
         WOLFSSL_X509_STORE_CTX *ctx);
 WOLFSSL_API int  wolfSSL_X509_STORE_CTX_init(WOLFSSL_X509_STORE_CTX* ctx,
@@ -2666,6 +2671,7 @@ enum {
 #define SSL_WRITING  WOLFSSL_WRITING
 #define SSL_READING  WOLFSSL_READING
 #define SSL_MAX_SSL_SESSION_ID_LENGTH  WOLFSSL_MAX_SSL_SESSION_ID_LENGTH
+#define SSL_MAX_SID_CTX_LENGTH  WOLFSSL_MAX_SSL_SESSION_ID_LENGTH
 
 #ifdef HAVE_OCSP
     /* OCSP Flags */
@@ -2814,6 +2820,10 @@ WOLFSSL_API int wolfSSL_SESSION_set_cipher(WOLFSSL_SESSION* session,
 WOLFSSL_API int  wolfSSL_is_init_finished(const WOLFSSL* ssl);
 
 WOLFSSL_API const char*  wolfSSL_get_version(const WOLFSSL* ssl);
+#ifdef OPENSSL_EXTRA
+WOLFSSL_API WOLF_STACK_OF(WOLFSSL_CIPHER)*  wolfSSL_get_client_ciphers(
+    WOLFSSL* ssl);
+#endif
 WOLFSSL_API int  wolfSSL_get_current_cipher_suite(WOLFSSL* ssl);
 WOLFSSL_API WOLFSSL_CIPHER*  wolfSSL_get_current_cipher(WOLFSSL* ssl);
 WOLFSSL_API char* wolfSSL_CIPHER_description(const WOLFSSL_CIPHER* cipher, char* in, int len);
@@ -4592,22 +4602,22 @@ enum {
 #endif
 #ifndef WOLFSSL_NO_ML_KEM
 #ifndef WOLFSSL_KYBER_ORIGINAL
-    WOLFSSL_PQC_MIN               = 583,
-    WOLFSSL_PQC_SIMPLE_MIN        = 583,
+    WOLFSSL_PQC_MIN               = 512,
+    WOLFSSL_PQC_SIMPLE_MIN        = 512,
 #endif
-    WOLFSSL_ML_KEM_512            = 583, /* ML-KEM 512 */
-    WOLFSSL_ML_KEM_768            = 584, /* ML-KEM 768 */
-    WOLFSSL_ML_KEM_1024           = 585, /* ML-KEM 1024 */
-    WOLFSSL_PQC_SIMPLE_MAX        = 585,
+    WOLFSSL_ML_KEM_512            = 512, /* ML-KEM 512 */
+    WOLFSSL_ML_KEM_768            = 513, /* ML-KEM 768 */
+    WOLFSSL_ML_KEM_1024           = 514, /* ML-KEM 1024 */
+    WOLFSSL_PQC_SIMPLE_MAX        = 514,
 
 #ifndef WOLFSSL_KYBER_ORIGINAL
-    WOLFSSL_PQC_HYBRID_MIN        = 12103,
+    WOLFSSL_PQC_HYBRID_MIN        = 12107,
 #endif
-    WOLFSSL_P256_ML_KEM_512       = 12103,
-    WOLFSSL_P384_ML_KEM_768       = 12104,
-    WOLFSSL_P521_ML_KEM_1024      = 12105,
-    WOLFSSL_PQC_HYBRID_MAX        = 12105,
-    WOLFSSL_PQC_MAX               = 12105,
+    WOLFSSL_P256_ML_KEM_512       = 12107,
+    WOLFSSL_P384_ML_KEM_768       = 12108,
+    WOLFSSL_P521_ML_KEM_1024      = 12109,
+    WOLFSSL_PQC_HYBRID_MAX        = 12109,
+    WOLFSSL_PQC_MAX               = 12109,
 #endif /* !WOLFSSL_NO_ML_KEM */
 #endif /* HAVE_PQC */
     WOLF_ENUM_DUMMY_LAST_ELEMENT(SSL_H)
@@ -5001,6 +5011,10 @@ WOLFSSL_API const WOLFSSL_STACK *wolfSSL_X509_REQ_get_extensions(const WOLFSSL_X
 WOLFSSL_API WOLFSSL_X509_EXTENSION* wolfSSL_X509_get_ext(const WOLFSSL_X509* x, int loc);
 WOLFSSL_API int wolfSSL_X509_get_ext_by_OBJ(const WOLFSSL_X509 *x,
         const WOLFSSL_ASN1_OBJECT *obj, int lastpos);
+WOLFSSL_API int wolfSSL_X509_OBJECT_set1_X509(WOLFSSL_X509_OBJECT *a,
+        WOLFSSL_X509 *obj);
+WOLFSSL_API int wolfSSL_X509_OBJECT_set1_X509_CRL(WOLFSSL_X509_OBJECT *a,
+        WOLFSSL_X509_CRL *obj);
 WOLFSSL_API WOLFSSL_X509_EXTENSION* wolfSSL_X509_set_ext(WOLFSSL_X509* x, int loc);
 WOLFSSL_API int wolfSSL_X509_EXTENSION_get_critical(const WOLFSSL_X509_EXTENSION* ex);
 WOLFSSL_API WOLFSSL_X509_EXTENSION* wolfSSL_X509_EXTENSION_new(void);
@@ -5142,6 +5156,7 @@ struct WOLFSSL_CONF_CTX {
 };
 
 WOLFSSL_API WOLFSSL_X509_NAME_ENTRY *wolfSSL_X509_NAME_get_entry(WOLFSSL_X509_NAME *name, int loc);
+WOLFSSL_API int wolfSSL_X509_NAME_ENTRY_set(const WOLFSSL_X509_NAME_ENTRY *ne);
 #endif /* OPENSSL_EXTRA || WOLFSSL_WPAS_SMALL */
 
 #if    defined(OPENSSL_EXTRA) \
@@ -5312,6 +5327,12 @@ WOLFSSL_API void wolfSSL_sk_X509_OBJECT_free(WOLFSSL_STACK* s);
 WOLFSSL_API void wolfSSL_sk_X509_OBJECT_pop_free(WOLFSSL_STACK* s,
         void (*f) (WOLFSSL_X509_OBJECT*));
 WOLFSSL_API int wolfSSL_sk_X509_OBJECT_push(WOLFSSL_STACK* sk, WOLFSSL_X509_OBJECT* obj);
+
+WOLFSSL_API WOLF_STACK_OF(WOLFSSL_X509_OBJECT)*
+        wolfSSL_sk_X509_OBJECT_deep_copy(
+            const WOLF_STACK_OF(WOLFSSL_X509_OBJECT)* sk,
+            WOLFSSL_X509_OBJECT* (*c)(const WOLFSSL_X509_OBJECT*),
+            void (*f)(WOLFSSL_X509_OBJECT*));
 
 WOLFSSL_API WOLFSSL_X509_INFO *wolfSSL_X509_INFO_new(void);
 WOLFSSL_API void wolfSSL_X509_INFO_free(WOLFSSL_X509_INFO* info);
@@ -5762,6 +5783,7 @@ WOLFSSL_API WOLF_STACK_OF(WOLFSSL_COMP) *WOLFSSL_COMP_get_compression_methods(vo
 #define SSL_COMP_get_compression_methods WOLFSSL_COMP_get_compression_methods
 #endif
 WOLFSSL_API int wolfSSL_X509_STORE_load_locations(WOLFSSL_X509_STORE *str, const char *file, const char *dir);
+WOLFSSL_API int wolfSSL_X509_STORE_set_default_paths(WOLFSSL_X509_STORE *str);
 WOLFSSL_API int wolfSSL_X509_STORE_add_crl(WOLFSSL_X509_STORE *ctx, WOLFSSL_X509_CRL *x);
 WOLFSSL_API int wolfSSL_sk_SSL_CIPHER_num(const WOLF_STACK_OF(WOLFSSL_CIPHER)* p);
 WOLFSSL_API int wolfSSL_sk_SSL_CIPHER_find(
